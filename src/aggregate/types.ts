@@ -105,12 +105,13 @@ export interface SubagentStats {
   /** Subagent sessions created in the day. */
   total: number
   /** Root sessions that created at least one subagent in the day. */
+  /** Sessions that created at least one subagent in the day, subagent parents included. */
   spawningSessions: number
-  /** Largest number of subagents created by one root session in the day. */
+  /** Largest number of subagents created by one session in the day. */
   maxPerSession: number
-  /** Subagent counts by agent preset, descending by count. */
+  /** Subagent counts by the parent session's agent preset, descending by count. */
   byPreset: Array<{ preset: string; count: number }>
-  /** Subagent counts by `provider/model` descriptor, descending by count. */
+  /** Subagent counts by the child's recorded `provider/model`, descending by count. */
   byModel: Array<{ model: string; count: number }>
 }
 

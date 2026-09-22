@@ -16,6 +16,11 @@ export interface LocalDayBounds {
 }
 /**
  * Resolve one `YYYY-MM-DD` local day to its UTC instant range in a zone.
+ *
+ * The range is the exact set of instants whose local calendar day is `date`,
+ * so a day whose zone shifts by 30 minutes, or whose transition lands on local
+ * midnight, is measured at its true length rather than at an assumed 23-25h.
+ * A day a zone skips entirely resolves to an empty range.
  * @param date - local calendar day, `YYYY-MM-DD`.
  * @param timeZone - IANA zone the day is interpreted in.
  * @returns the half-open `[start, end)` range in epoch milliseconds.

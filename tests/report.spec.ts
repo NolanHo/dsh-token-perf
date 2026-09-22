@@ -65,7 +65,7 @@ function attempt(
 
 /** @returns the report for one synthetic day. */
 function build(sessions: ScannedSession[], events: ScannedEvent[]): DayReport {
-  const scan: DayScan = { sessions, events, scannedAt: 1 }
+  const scan: DayScan = { sessions, events, skippedEvents: 0, scannedAt: 1 }
   return buildDayReport({ scan, date: DATE, timezone: TIMEZONE, generatedAt: 2, durationMs: 3 })
 }
 
@@ -336,5 +336,87 @@ describe('buildDayReport sessions and subagents', () => {
     expect(report.byModel[0]).toMatchObject({ provider: 'pai-ds', model: 'deepseek-flash', input: 100, calls: 1 })
     expect(report.sessions[0]).toMatchObject({ input: 100, llmCalls: 2, compactions: 1 })
     expect(totalOf(report.totals)).toBe(100)
+  })
+})
+
+describe('buildDayReport replacement slot matches the harness projection', () => {
+  it('starts from zero when a key reappears after another key advanced the slot', () => {
+    // The projection holds one `last` slot, not a map: (1,1) -> (2,1) -> (1,1)
+    // bills the third sample in full, where a per-key map would bill the delta.
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        message(1, 1, 1, 1, bounds.start + MINUTE, { inputTokens: 100, outputTokens: 10 }),
+        message(1, 2, 2, 1, bounds.start + 2 * MINUTE, { inputTokens: 600, outputTokens: 60 }),
+        message(1, 3, 1, 1, bounds.start + 3 * MINUTE, { inputTokens: 500, outputTokens: 50 }),
+      ],
+    )
+    expect(report.totals).toMatchObject({ input: 1_200, output: 120 })
+    expect(report.sessions[0]).toMatchObject({ input: 1_200, output: 120, llmCalls: 3 })
+  })
+
+  it('clears only the retried step, so a retry for another step leaves the slot in place', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        message(1, 1, 2, 1, bounds.start + MINUTE, { inputTokens: 600, outputTokens: 60 }),
+        event(1, 2, 'llm/retry-started', bounds.start + 2 * MINUTE, { turn: 9, step: 9 }),
+        message(1, 3, 2, 1, bounds.start + 3 * MINUTE, { inputTokens: 600, outputTokens: 60 }),
+      ],
+    )
+    // The second sample still replaces the first, so the day bills one attempt.
+    expect(report.totals).toMatchObject({ input: 600, output: 60 })
+  })
+
+  it('bills a retried step twice', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        message(1, 1, 1, 1, bounds.start + MINUTE, { inputTokens: 100, outputTokens: 10 }),
+        event(1, 2, 'llm/retry-started', bounds.start + 2 * MINUTE, { turn: 1, step: 1 }),
+        message(1, 3, 1, 1, bounds.start + 3 * MINUTE, { inputTokens: 100, outputTokens: 10 }),
+      ],
+    )
+    expect(report.totals).toMatchObject({ input: 200, output: 20 })
+  })
+})
+
+describe('buildDayReport route attribution', () => {
+  const ROUTE_A = { provider: 'pai-ds', model: 'deepseek-flash' }
+  const ROUTE_B = { provider: 'zhipu-official', model: 'glm-5.3' }
+
+  it('moves the whole amount when a replacement lands on another route', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        message(1, 1, 1, 1, bounds.start + MINUTE, { inputTokens: 100 }, ROUTE_A),
+        message(1, 2, 1, 1, bounds.start + 2 * MINUTE, { inputTokens: 150 }, ROUTE_B),
+      ],
+    )
+    expect(report.totals.input).toBe(150)
+    expect(report.byModel).toEqual([
+      { ...ROUTE_B, input: 150, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, calls: 1 },
+    ])
+  })
+
+  it('attributes an amount whose route only becomes known on the replacement', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        // No `message.source` on the first sample, so it enters the totals unrouted.
+        event(1, 1, 'assistant/message', bounds.start + MINUTE, {
+          turn: 1,
+          step: 1,
+          message: {},
+          usage: { inputTokens: 100 },
+          stream: [],
+        }),
+        message(1, 2, 1, 1, bounds.start + 2 * MINUTE, { inputTokens: 150 }, ROUTE_A),
+      ],
+    )
+    expect(report.totals.input).toBe(150)
+    expect(report.byModel).toEqual([
+      { ...ROUTE_A, input: 150, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, calls: 1 },
+    ])
   })
 })

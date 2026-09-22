@@ -4,9 +4,9 @@
  * bytes.
  *
  * Every assertion reads a committed file and resolves it from this file's own
- * location, so the suite runs from any working directory. `lib/` is
- * deliberately not asserted: it is a build artifact, and requiring it here
- * would fail the suite on a clean checkout before a build.
+ * location, so the suite runs from any working directory. The committed
+ * `lib/` artifacts are asserted for presence, identity, and byte equality with
+ * the vendored resource, because a git install loads them without a build.
  * @module dsh-token-perf/tests/manifest
  */
 import { createHash } from 'node:crypto'
@@ -14,6 +14,19 @@ import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+
+/** Module specifiers a browser bundle may keep: the shell's platform module table. */
+const PLATFORM_MODULES = [
+  'react',
+  'react/jsx-runtime',
+  'react-dom',
+  'react-dom/client',
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-dockkit',
+]
 
 /** Repository root, resolved from this file rather than from the working directory. */
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -131,5 +144,45 @@ describe('frozen wire contract', () => {
       name => !new RegExp(`export (?:interface|type) ${name}\\b`).test(types),
     )
     expect(missing).toEqual([])
+  })
+})
+
+describe('committed build artifacts', () => {
+  /**
+   * `lib/` is committed so a git install needs no build step, which makes the
+   * artifacts a distribution contract rather than a local output. These checks
+   * cover what can be verified without a rebuild: presence, identity, and the
+   * vendored resource's byte equality with its source. Rebuilding against a
+   * changed source is covered by `pnpm build` in development, not here.
+   */
+  const artifacts = ['lib/index.js', 'lib/client.js', 'lib/zstd-dictionary.bin'] as const
+
+  it('ships every entry point an installer loads', () => {
+    for (const artifact of artifacts) {
+      expect(statSync(join(ROOT, artifact)).size, artifact).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps the built dictionary identical to the vendored source', () => {
+    const vendored = readFileSync(join(ROOT, DICTIONARY))
+    const built = readFileSync(join(ROOT, 'lib/zstd-dictionary.bin'))
+    expect(built.equals(vendored)).toBe(true)
+  })
+
+  it('registers the client bundle under the id the profile row names', () => {
+    const bundle = readText('lib/client.js')
+    expect(bundle).toContain('window.__ModuleLoader__.load(')
+    expect(bundle).toContain('id: "dsh-token-perf"')
+    const foreign = [...bundle.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)]
+      .map(match => match[1] ?? '')
+      .filter(specifier => !PLATFORM_MODULES.includes(specifier))
+    expect(foreign).toEqual([])
+  })
+
+  it('exposes the host plugin identity and its config schema', () => {
+    const host = readText('lib/index.js')
+    expect(host).toContain('dsh-token-perf')
+    expect(host).toMatch(/export\s*\{[^}]*\bapply\b/)
+    expect(host).toMatch(/export\s*\{[^}]*\bConfig\b/)
   })
 })

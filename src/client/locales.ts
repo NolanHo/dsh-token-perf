@@ -30,6 +30,7 @@ export const zh = {
   'header.timezone': '时区 {zone}（{offset}）',
   'header.generated': '生成于 {time}，耗时 {duration}',
   'header.invalidDate': '请输入有效日期（YYYY-MM-DD）。',
+  'header.skippedEvents': '另有 {count} 条事件无法解码，未计入任何合计。',
 
   'state.loading': '正在读取 {date} 的报告…',
   'state.empty.title': '{date} 没有任何活动',
@@ -59,7 +60,8 @@ export const zh = {
   'summary.toolResults': '工具结果 {count}',
   'summary.compactions': '上下文压缩',
   'summary.summaryTokens': '摘要 token {count}',
-  'summary.llmCalls': '模型调用（计量）',
+  'summary.llmCalls': '用量结算次数',
+  'summary.llmCallsDetail': '助手消息 {assistant}，另含重试与摘要调用',
 
   'tokens.title': 'Token 构成',
   'tokens.input': '输入',
@@ -139,6 +141,7 @@ export const en = {
   'header.timezone': 'Time zone {zone} ({offset})',
   'header.generated': 'Generated {time}, took {duration}',
   'header.invalidDate': 'Enter a valid date (YYYY-MM-DD).',
+  'header.skippedEvents': '{count} further events could not be decoded and are in no total.',
 
   'state.loading': 'Loading the report for {date}…',
   'state.empty.title': 'No activity on {date}',
@@ -168,7 +171,8 @@ export const en = {
   'summary.toolResults': 'tool results {count}',
   'summary.compactions': 'Compactions',
   'summary.summaryTokens': 'summary tokens {count}',
-  'summary.llmCalls': 'Metered model calls',
+  'summary.llmCalls': 'Usage settlements',
+  'summary.llmCallsDetail': 'assistant messages {assistant}, plus retries and summaries',
 
   'tokens.title': 'Token composition',
   'tokens.input': 'Input',

@@ -112,6 +112,80 @@ describe('isLocalDayKey', () => {
   })
 })
 
+describe('localDayBounds covers a local day exactly in transition-edge zones', () => {
+  /**
+   * Zones whose offset changes at, or across, local midnight. Deriving the
+   * boundary from the offset at UTC midnight lands on the neighbouring day for
+   * every one of these, so each is a regression case, not a generality.
+   */
+  const cases: ReadonlyArray<readonly [string, string, number]> = [
+    // Lord Howe shifts by 30 minutes: 23.5h when DST opens in October, 24.5h when it closes in April.
+    ['Australia/Lord_Howe', '2026-10-04', 23.5 * HOUR],
+    ['Australia/Lord_Howe', '2026-04-05', 24.5 * HOUR],
+    // Chile ends DST at 00:00 on the first Sunday of April, so the 25h day is the one before it.
+    ['America/Santiago', '2026-04-04', 25 * HOUR],
+    ['America/Santiago', '2026-04-05', 24 * HOUR],
+    ['Pacific/Chatham', '2026-09-27', 23 * HOUR],
+    ['Africa/Cairo', '2026-04-24', 23 * HOUR],
+    ['America/Santiago', '2026-09-06', 23 * HOUR],
+  ]
+
+  it('measures each transition day at its true length', () => {
+    for (const [zone, date, length] of cases) {
+      const { start, end } = localDayBounds(date, zone)
+      expect(end - start, `${zone} ${date}`).toBe(length)
+    }
+  })
+
+  it('brackets the day so no instant of another day is included', () => {
+    for (const [zone, date] of cases) {
+      const { start, end } = localDayBounds(date, zone)
+      expect(localDayKey(start, zone), `${zone} ${date} start`).toBe(date)
+      expect(localDayKey(start - 1, zone), `${zone} ${date} start-1`).not.toBe(date)
+      expect(localDayKey(end - 1, zone), `${zone} ${date} end-1`).toBe(date)
+      expect(localDayKey(end, zone), `${zone} ${date} end`).not.toBe(date)
+    }
+  })
+
+  it('holds the bracket invariant across zones and dates', () => {
+    const zones = [
+      'UTC',
+      'Asia/Shanghai',
+      'Asia/Kathmandu',
+      'Australia/Lord_Howe',
+      'Pacific/Chatham',
+      'America/Santiago',
+      'Africa/Cairo',
+      'America/Los_Angeles',
+      'Europe/Dublin',
+      'Pacific/Apia',
+      'America/Sao_Paulo',
+      'Asia/Tehran',
+    ]
+    const dates = ['2026-01-01', '2026-03-08', '2026-04-05', '2026-09-06', '2026-10-04', '2026-11-01', '2026-12-31']
+    for (const zone of zones) {
+      for (const date of dates) {
+        const { start, end } = localDayBounds(date, zone)
+        expect(start, `${zone} ${date}`).toBeLessThan(end)
+        expect(localDayKey(start, zone), `${zone} ${date} start`).toBe(date)
+        expect(localDayKey(end - 1, zone), `${zone} ${date} end-1`).toBe(date)
+      }
+    }
+  })
+
+  it('keeps the literal year for dates below 100', () => {
+    const { start } = localDayBounds('0099-01-01', 'UTC')
+    expect(localDayKey(start, 'UTC')).toBe('0099-01-01')
+    expect(new Date(start).getUTCFullYear()).toBe(99)
+  })
+
+  it('resolves a day a zone skips entirely to an empty range', () => {
+    // Pacific/Apia moved across the date line on 2011-12-30, which never existed locally.
+    const { start, end } = localDayBounds('2011-12-30', 'Pacific/Apia')
+    expect(end).toBe(start)
+  })
+})
+
 describe('resolveHostTimeZone', () => {
   it('reports a zone the platform can resolve', () => {
     const zone = resolveHostTimeZone()

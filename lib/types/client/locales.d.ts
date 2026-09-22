@@ -27,6 +27,7 @@ export declare const zh: {
     readonly 'header.timezone': "时区 {zone}（{offset}）";
     readonly 'header.generated': "生成于 {time}，耗时 {duration}";
     readonly 'header.invalidDate': "请输入有效日期（YYYY-MM-DD）。";
+    readonly 'header.skippedEvents': "另有 {count} 条事件无法解码，未计入任何合计。";
     readonly 'state.loading': "正在读取 {date} 的报告…";
     readonly 'state.empty.title': "{date} 没有任何活动";
     readonly 'state.empty.body': "这一天没有开启或活跃的会话，也没有计量到的模型调用。";
@@ -53,7 +54,8 @@ export declare const zh: {
     readonly 'summary.toolResults': "工具结果 {count}";
     readonly 'summary.compactions': "上下文压缩";
     readonly 'summary.summaryTokens': "摘要 token {count}";
-    readonly 'summary.llmCalls': "模型调用（计量）";
+    readonly 'summary.llmCalls': "用量结算次数";
+    readonly 'summary.llmCallsDetail': "助手消息 {assistant}，另含重试与摘要调用";
     readonly 'tokens.title': "Token 构成";
     readonly 'tokens.input': "输入";
     readonly 'tokens.output': "输出";
@@ -125,6 +127,7 @@ export declare const en: {
     readonly 'header.timezone': "Time zone {zone} ({offset})";
     readonly 'header.generated': "Generated {time}, took {duration}";
     readonly 'header.invalidDate': "Enter a valid date (YYYY-MM-DD).";
+    readonly 'header.skippedEvents': "{count} further events could not be decoded and are in no total.";
     readonly 'state.loading': "Loading the report for {date}…";
     readonly 'state.empty.title': "No activity on {date}";
     readonly 'state.empty.body': "No session was opened or active on this day, and no model call was metered.";
@@ -151,7 +154,8 @@ export declare const en: {
     readonly 'summary.toolResults': "tool results {count}";
     readonly 'summary.compactions': "Compactions";
     readonly 'summary.summaryTokens': "summary tokens {count}";
-    readonly 'summary.llmCalls': "Metered model calls";
+    readonly 'summary.llmCalls': "Usage settlements";
+    readonly 'summary.llmCallsDetail': "assistant messages {assistant}, plus retries and summaries";
     readonly 'tokens.title': "Token composition";
     readonly 'tokens.input': "Input";
     readonly 'tokens.output': "Output";

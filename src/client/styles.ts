@@ -201,10 +201,14 @@ const RULES = `
 
 /**
  * Install the plugin's style tag once per activation.
+ *
+ * A tag left by an earlier activation — an HMR rebuild re-running this module —
+ * is replaced rather than reused, so the newest activation owns the one tag in
+ * the document and its disposer really removes it.
  * @returns a disposer removing the tag this call installed.
  */
 export function injectStyles(): () => void {
-  if (document.querySelector(`style[data-plugin-css="${STYLE_ID}"]`) !== null) return () => {}
+  for (const stale of document.querySelectorAll(`style[data-plugin-css="${STYLE_ID}"]`)) stale.remove()
   const tag = document.createElement('style')
   tag.dataset.plugin = 'dsh-token-perf'
   tag.dataset.pluginCss = STYLE_ID

@@ -54,6 +54,8 @@ export interface DayScan {
     sessions: ScannedSession[];
     /** Events inside the window, ascending by `(sessionId, seq)`. */
     events: ScannedEvent[];
+    /** In-window rows whose payload could not be decoded and were left out. */
+    skippedEvents: number;
     /** When the scan finished, epoch milliseconds. */
     scannedAt: number;
 }

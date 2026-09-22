@@ -258,14 +258,16 @@ describe('getDayReport', () => {
     addEvent(db, 1, 1, 'user/message', yesterdayStart + 1_000, { turn: 1, step: 1, source: { kind: 'user' }, content: [] })
     addEvent(db, 1, 2, 'user/message', todayStart + 1_000, { turn: 2, step: 1, source: { kind: 'user' }, content: [] })
     const config = configFor(path, 60_000)
-    vi.useFakeTimers({ now: todayStart + 12 * 3_600_000 })
+    // Fake only the clock: the scan yields through setImmediate, and faking
+    // the whole timer set would leave that yield unable to resolve.
+    vi.useFakeTimers({ now: todayStart + 12 * 3_600_000, toFake: ['Date'] })
 
     const past = await getDayReport(YESTERDAY, config)
     const today = await getDayReport(TODAY, config)
 
     addEvent(db, 1, 3, 'user/message', yesterdayStart + 2_000, { turn: 1, step: 2, source: { kind: 'user' }, content: [] })
     addEvent(db, 1, 4, 'user/message', todayStart + 2_000, { turn: 2, step: 2, source: { kind: 'user' }, content: [] })
-    vi.advanceTimersByTime(3_600_000)
+    vi.setSystemTime(todayStart + 13 * 3_600_000)
 
     const pastAgain = await getDayReport(YESTERDAY, config)
     const todayAgain = await getDayReport(TODAY, config)

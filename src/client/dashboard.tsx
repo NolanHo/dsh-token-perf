@@ -668,6 +668,14 @@ export function Dashboard(props: DashboardProps): ReactNode {
             )
           : null}
 
+        {report !== undefined && report.skippedEvents > 0
+          ? (
+              <p className={cx(`${PREFIX}-invalid`)} role="status">
+                {copy('header.skippedEvents', { count: exactCount(report.skippedEvents) })}
+              </p>
+            )
+          : null}
+
         {invalidDraft
           ? <p className={cx(`${PREFIX}-invalid`)} role="alert">{copy('header.invalidDate')}</p>
           : null}
@@ -783,7 +791,12 @@ function SummaryCards({ copy, report }: { copy: Translator; report: DayReport })
         count: compactCount(totalTokens(report.compaction.summaryTokens)),
       }),
     },
-    { id: 'calls', title: copy('summary.llmCalls'), value: exactCount(totals.llmCalls) },
+    {
+      id: 'calls',
+      title: copy('summary.llmCalls'),
+      value: exactCount(totals.llmCalls),
+      detail: copy('summary.llmCallsDetail', { assistant: exactCount(totals.assistantMessages) }),
+    },
   ]
   return (
     <section className={cx(`${PREFIX}-section`)}>

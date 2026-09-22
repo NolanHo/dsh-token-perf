@@ -63,9 +63,13 @@ interface Route {
 
 /** The replacement slot one `(turn, step)` key last held. */
 interface FoldSlot {
+  /** The key this slot belongs to; the projection keeps exactly one. */
+  key: string
   buckets: TokenBuckets
   /** Route of the sample that filled the slot; a route-less sample inherits it. */
   route: Route | undefined
+  /** Whether this slot's single call is currently counted on {@link route}. */
+  counted: boolean
 }
 
 /** One session's day, accumulated while the events fold. */
@@ -84,8 +88,13 @@ interface SessionFold {
   compactions: number
   llmCalls: number
   models: Set<string>
-  /** Replacement slots by `turn:step`, per session like the projection's state. */
-  slots: Map<string, FoldSlot>
+  /**
+   * The one replacement slot this session holds, mirroring the projection's
+   * `last` field: a sample replaces the slot only when its key matches, so a
+   * key that reappears after another one advanced the slot starts from zero
+   * rather than from its own stale buckets.
+   */
+  slot: FoldSlot | null
   /** `provider/model` from the child's `subagent/descriptor`, when it wrote one. */
   subagentModel: string | undefined
   /** Children this session created inside the window; filled after the event fold. */
@@ -144,24 +153,37 @@ export function buildDayReport(input: BuildReportInput): DayReport {
     const buckets = bucketsOf(sample)
     if (buckets === undefined) return
     const key = `${numberOf(data.turn)}:${numberOf(data.step)}`
-    const previous = fold.slots.get(key)
+    const previous = fold.slot !== null && fold.slot.key === key ? fold.slot : undefined
     const ownRoute = routeOf(data)
+    // A route-less sample keeps the slot's route: the amount belongs to the
+    // route that produced it, and a replacement must not orphan it.
     const route = ownRoute ?? previous?.route
     const row = route === undefined ? undefined : routeRow(route)
+    const previousRow = previous?.route === undefined ? undefined : routeRow(previous.route)
+    const previousCallRow = previous?.counted === true ? previousRow : undefined
     let delta = 0
     for (const bucket of BUCKET_KEYS) {
       const change = buckets[bucket] - (previous?.buckets[bucket] ?? 0)
       delta += change
       totals[bucket] += change
       fold.buckets[bucket] += change
-      if (row !== undefined) row[bucket] += change
     }
-    // Only a routed settlement is a completed assistant message on that route.
-    if (ownRoute !== undefined && row !== undefined) {
-      row.calls += 1
-      fold.models.add(`${ownRoute.provider}/${ownRoute.model}`)
+    // A route row holds the slot's current amount on the slot's current route,
+    // so the old route gives its amount back and the new one takes the whole.
+    // On an unchanged route the two steps compose to the delta.
+    if (previous !== undefined && previousRow !== undefined) {
+      for (const bucket of BUCKET_KEYS) previousRow[bucket] -= previous.buckets[bucket]
     }
-    fold.slots.set(key, { buckets, route })
+    if (row !== undefined) {
+      for (const bucket of BUCKET_KEYS) row[bucket] += buckets[bucket]
+    }
+    if (route !== undefined) fold.models.add(`${route.provider}/${route.model}`)
+    // One slot is one settlement, so it carries one call and moves with the
+    // route it ends up on; refining a slot never invents a second call, while
+    // arriving at an empty slot does (a retry cleared it, or it is a new key).
+    if (previousCallRow !== undefined && previousCallRow !== row) previousCallRow.calls -= 1
+    if (row !== undefined && previousCallRow !== row) row.calls += 1
+    fold.slot = { key, buckets, route, counted: row !== undefined }
     const minute = Math.floor(event.time / MILLISECONDS_PER_MINUTE)
     minuteTokens.set(minute, (minuteTokens.get(minute) ?? 0) + delta)
     const hour = localHourOf(event.time, timezone)
@@ -245,10 +267,13 @@ export function buildDayReport(input: BuildReportInput): DayReport {
       case 'compaction/summary':
         if (data !== undefined) applySummary(fold, event, data)
         break
-      case 'llm/retry-started':
-        // Clears only the retried step's slot, exactly like the tokenUsage projection.
-        fold.slots.delete(`${numberOf(data?.turn)}:${numberOf(data?.step)}`)
+      case 'llm/retry-started': {
+        // Clears the retried step's slot, and only that one, exactly like the
+        // tokenUsage projection: a retry for another step leaves the slot alone.
+        const retried = `${numberOf(data?.turn)}:${numberOf(data?.step)}`
+        if (fold.slot !== null && fold.slot.key === retried) fold.slot = null
         break
+      }
       case 'session/title':
         if (typeof data?.title === 'string' && data.title !== '') fold.title = data.title
         break
@@ -341,6 +366,9 @@ export function buildDayReport(input: BuildReportInput): DayReport {
   sessions.sort((left, right) => totalOf(right) - totalOf(left) || compareKeys(left.id, right.id))
 
   const byModel = [...routes.values()]
+    // A replacement that moves a slot to another route leaves the old route's
+    // row at zero; it is not a route the day was billed on, so it is dropped.
+    .filter(row => row.calls > 0 || totalOf(row) !== 0)
     .sort((left, right) => totalOf(right) - totalOf(left) || compareKeys(routeKey(left), routeKey(right)))
 
   const compaction: CompactionStats = {
@@ -367,6 +395,7 @@ export function buildDayReport(input: BuildReportInput): DayReport {
     timezoneOffsetMinutes,
     generatedAt,
     durationMs,
+    skippedEvents: input.scan.skippedEvents,
     totals,
     byModel,
     sessions,
@@ -400,7 +429,7 @@ function createFold(id: string, header: ScannedSession | undefined, fallbackTime
     compactions: 0,
     llmCalls: 0,
     models: new Set(),
-    slots: new Map(),
+    slot: null,
     subagentModel: undefined,
     subagents: 0,
     active: false,

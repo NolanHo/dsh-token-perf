@@ -15,6 +15,10 @@ export declare const PREFIX = "dstp";
 export declare const STYLE_ID = "dsh-token-perf";
 /**
  * Install the plugin's style tag once per activation.
+ *
+ * A tag left by an earlier activation — an HMR rebuild re-running this module —
+ * is replaced rather than reused, so the newest activation owns the one tag in
+ * the document and its disposer really removes it.
  * @returns a disposer removing the tag this call installed.
  */
 export declare function injectStyles(): () => void;

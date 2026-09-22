@@ -58,7 +58,7 @@ export interface SessionUsage extends TokenBuckets {
   toolResults: number
   /** Compactions started in the day. */
   compactions: number
-  /** Token-metered model calls attributed to this session. */
+  /** Usage samples attributed to this session; see {@link DayTotals.llmCalls}. */
   llmCalls: number
   /** Subagent sessions this session created in the day. */
   subagents: number
@@ -104,7 +104,6 @@ export interface CompactionStats {
 export interface SubagentStats {
   /** Subagent sessions created in the day. */
   total: number
-  /** Root sessions that created at least one subagent in the day. */
   /** Sessions that created at least one subagent in the day, subagent parents included. */
   spawningSessions: number
   /** Largest number of subagents created by one session in the day. */
@@ -133,7 +132,11 @@ export interface DayTotals extends TokenBuckets {
   toolResults: number
   /** Compactions started in the day. */
   compactions: number
-  /** Token-metered model calls, including summary calls. */
+  /**
+   * Usage samples folded in the day: completed assistant messages, the attempt
+   * streams that carry a sample of their own, and compaction summaries. It is
+   * therefore a settlement count, not `assistantMessages`, and the two differ.
+   */
   llmCalls: number
 }
 
@@ -149,6 +152,11 @@ export interface DayReport {
   generatedAt: number
   /** Wall-clock cost of producing the report. */
   durationMs: number
+  /**
+   * In-window events whose payload could not be decoded. They are excluded
+   * from every total, so a non-zero value marks the report as incomplete.
+   */
+  skippedEvents: number
   /** Day-wide counters and token buckets. */
   totals: DayTotals
   /** Per-route usage, descending by total tokens. */

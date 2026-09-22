@@ -62,12 +62,26 @@ export interface ScannedEvent {
   data: unknown
 }
 
+/**
+ * Rows the iterator may step before yielding to the event loop. A full-store
+ * window is 10^6 rows, so the batch is a responsiveness knob: ~2ms of work per
+ * yield at the measured decode rate, and a negligible fraction of the total.
+ */
+const YIELD_EVERY_ROWS = 256
+
+/** Hand the event loop one turn, so a long synchronous scan cannot starve it. */
+async function yieldToLoop(): Promise<void> {
+  await new Promise<void>(resolve => { setImmediate(resolve) })
+}
+
 /** Everything one day's scan produced. */
 export interface DayScan {
   /** Headers created inside the window plus every header with events in it. */
   sessions: ScannedSession[]
   /** Events inside the window, ascending by `(sessionId, seq)`. */
   events: ScannedEvent[]
+  /** In-window rows whose payload could not be decoded and were left out. */
+  skippedEvents: number
   /** When the scan finished, epoch milliseconds. */
   scannedAt: number
 }
@@ -147,25 +161,48 @@ export async function scanDay(options: ScanOptions): Promise<DayScan> {
     const decodeData = createDataDecoder(dictionaryPath)
     const events: ScannedEvent[] = []
     const scannedSessionIds = new Set<number>()
+    let skippedEvents = 0
     const rows = store.prepare(
       `SELECT session_id, seq, type, time, data, ignorable FROM events
         WHERE time >= ? AND time < ?
         ORDER BY session_id, seq`,
     ).iterate(start, end) as unknown as Iterable<EventRow>
+    let sinceYield = 0
     for (const row of rows) {
       if (isPackedChunkRow(row.ignorable, row.type)) continue
       scannedSessionIds.add(row.session_id)
-      events.push({
-        sessionId: row.session_id,
-        seq: row.seq,
-        type: row.type,
-        time: row.time,
-        data: JSON.parse(decodeData(row.data)),
-      })
+      // One undecodable payload costs that event, not the day: a store whose
+      // owner kept writing can carry a row this reader cannot parse, and an
+      // all-or-nothing failure would leave the panel permanently empty on a
+      // multi-second scan. The count reaches the report so the gap is visible.
+      try {
+        events.push({
+          sessionId: row.session_id,
+          seq: row.seq,
+          type: row.type,
+          time: row.time,
+          data: JSON.parse(decodeData(row.data)),
+        })
+      } catch {
+        skippedEvents += 1
+      }
+      // `node:sqlite` steps synchronously, so a whole-store window would block
+      // the host event loop for seconds: measured on the 1.9GB store, one
+      // 2026-09-21 window scanned in 5.6s with the loop unresponsive the whole
+      // time. Yielding every batch keeps it responsive — the same window now
+      // runs 5.7s with 194 timer ticks and a 266ms longest gap — so a scan
+      // cannot stall the live Session streams it runs beside.
+      if (++sinceYield >= YIELD_EVERY_ROWS) {
+        sinceYield = 0
+        await yieldToLoop()
+      }
     }
+    // The header query is synchronous too, so the loop must be free before it runs.
+    await yieldToLoop()
     return {
       sessions: loadHeaders(store, start, end, scannedSessionIds),
       events,
+      skippedEvents,
       scannedAt: Date.now(),
     }
   } catch (error) {

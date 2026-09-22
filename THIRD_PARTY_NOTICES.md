@@ -7,7 +7,9 @@
 | | |
 |---|---|
 | Origin | DeepSeek Harness — `deepseek-ai/deepseek-harness`, `packages/session/session-persistence-sqlite/resources/zstd-dictionary.bin` |
-| Version | `v0.1.5-rc.2` |
+| Introduced upstream | commit `df76bc695b` (`feat(session): reduce persistence storage size`) |
+| Carried in this fork | commit `d2866ef96d` (`fix(session): port fork-owned sqlite persistence to the handle-based seam`) |
+| Not from | tag `v0.1.5-rc.2`: upstream removed the SQLite backend in `4553c9d957` and the fork restored it, so the tag has no such path |
 | License | MIT, Copyright (c) 2026 DeepSeek |
 | Copy | Verbatim, byte for byte; no modification |
 | sha256 | `dad18fa0247a8fdd886a62d8552eabd36cbd50c25af172873080d2f0ae770d17` |

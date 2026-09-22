@@ -104,7 +104,7 @@ host 半有四个字段，写在 cordis 组合里 `dsh-token-perf` 那一行下�
 - **schema 守卫。** reader 要求 `PRAGMA user_version` 为 20 且它读取的列都存在。任何其它情况在解码任何 payload 之前就以 `unsupported-schema` 失败，而不是用不认识的格式报出错误数字。
 - **token 口径镜像 harness 自己的 `tokenUsage` 投影。** 采样按 `(session, turn, step)` 折叠：同一个 key 后到的采样替换先前的，只有净增量会改变总计；`llm/retry-started` 清空该 key，于是重试的那次调用会完整计费。一个采样要么是 `assistant/message` 的 `data.usage`，要么是 `assistant/attempt` 的 `data.stream` 里最后一个 `chunk.type === 'usage'`。五个桶映射 `inputTokens`、`outputTokens`、`cacheReadTokens`、`cacheWriteTokens`、`reasoningTokens`；`totalTokens` 从不求和，因为它是单次调用含 cache 的全量，而不是五个桶之一。不带路由的采样会归到它所替换的那条采样的路由上。
 - **路由键是 `provider:model`。** 路由读自 `assistant/message.data.message.source.{provider,model}`。同一个模型由两个 provider 提供就是两行，因为那是两条计费路由。
-- **"一天"是宿主本地自然日。** 日界通过 IANA 时区在两个边界上的真实 offset 解析，因此跨 DST 的那一天正确地是 23 或 25 小时。既不是 UTC，也不是浏览器所在时区。
+- **"一天"是宿主本地自然日。** 日界是"本地自然日恰好等于该日期"的全部瞬间的起止：实现按该时区对瞬间的渲染做二分，因此跨 DST 的那一天按其真实长度计量（包括偏移只跳 30 分钟的 Australia/Lord_Howe，以及在本地午夜切换的 America/Santiago、Africa/Cairo），被时区整体跳过的日期则解析为空区间。既不是 UTC，也不是浏览器所在时区。
 - **开启与活跃。** "开启"指 session header 的 `created_at` 落在当天内；"活跃"指该 session 当天至少拥有一条 event。`sessions.parent_session` 有值即判为 subagent。不使用 `origin` 列，因为在本插件构建时所用的库里它与 `parent_session` 不一致。
 - **subagent 分布。** 每个父的计数来自 `parent_session`；preset 来自 session header 的 `agent_preset`，模型来自子 session 自己的 `subagent/descriptor` 事件（`agentProvider`/`agentModel`）。库里没记录的主体报成 `(unknown)`，而不是丢掉。
 - **工具。** `tool/call` 与 `tool/result` 各自独立计数。真实库里两者数量不同——被中断的、被派发的调用——所以谁也不是从谁推出来的。

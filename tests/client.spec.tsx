@@ -90,6 +90,7 @@ const FIXTURE: DayReport = {
   timezoneOffsetMinutes: -420,
   generatedAt: NOW,
   durationMs: 1_234,
+  skippedEvents: 0,
   totals: {
     ...buckets(31_298_899, 19_880_737, 3_676_235_324),
     sessionsOpened: 281,

@@ -9,5 +9,8 @@ MIT License:
       The schema-20 zstd dictionary used by the DeepSeek Harness SQLite
       session store to compress session-event payloads. Copied verbatim from
       packages/session/session-persistence-sqlite/resources/zstd-dictionary.bin
-      at deepseek-harness v0.1.5-rc.2 so this plugin can read the store
-      without the harness checkout on disk.
+      as introduced upstream in deepseek-harness commit df76bc695b and carried
+      by the NolanHo fork from commit d2866ef96d, so this plugin can read the
+      store without the harness checkout on disk. (The file is not present in
+      the harness v0.1.5-rc.2 tag: upstream removed the SQLite backend in
+      4553c9d957 and this fork restored it.)

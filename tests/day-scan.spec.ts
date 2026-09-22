@@ -225,3 +225,21 @@ describe('scanDay', () => {
     expect(failure.message).toContain('packed discriminator')
   })
 })
+
+describe('scanDay tolerates an undecodable row', () => {
+  it('keeps the day and counts the row it could not decode', async () => {
+    const databasePath = writeStore('skipped-row', (store) => {
+      insertSession(store, 1, 'session-root', WINDOW_START + 1_000)
+      insertEvent(store, 1, 1, 'user/message', WINDOW_START + 10, { content: 'readable' })
+      // Neither a JSON text row nor a frame this dictionary decodes.
+      store.prepare(
+        `INSERT INTO events (session_id, seq, type, time, data, source_event_seqs, surface_op, ignorable)
+          VALUES (1, 2, 'assistant/message', ?, ?, NULL, NULL, 1)`,
+      ).run(WINDOW_START + 20, Buffer.from('not a zstd frame at all'))
+    })
+
+    const scan = await scanDay(options(databasePath))
+    expect(scan.skippedEvents).toBe(1)
+    expect(scan.events.map(event => event.type)).toEqual(['user/message'])
+  })
+})

@@ -12,5 +12,5 @@ MIT License:
       as introduced upstream in deepseek-harness commit df76bc695b and carried
       by the NolanHo fork from commit d2866ef96d, so this plugin can read the
       store without the harness checkout on disk. (The file is not present in
-      the harness v0.1.5-rc.2 tag: upstream removed the SQLite backend in
+      the harness `dsh-v0.1.5-rc.2` tag: upstream removed the SQLite backend in
       4553c9d957 and this fork restored it.)

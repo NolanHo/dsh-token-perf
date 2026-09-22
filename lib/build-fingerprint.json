@@ -1,0 +1,21 @@
+{
+  "algorithm": "sha256",
+  "digest": "127eb5bb4d35d624980e1617e4674469bac612ac96f27ba1cea94d5bd17cb297",
+  "files": {
+    "src/aggregate/day.ts": "4bc3d332aecf1fd47d2dc37e79ef99be763094847bb8ba2f614d7f6de2e8b991",
+    "src/aggregate/report.ts": "5617c12fcc3a3c5d0bd0e7894b67f0906538a7f73d0e061fc86d1fe1fa0aa9be",
+    "src/aggregate/types.ts": "7e66b582a2e4adfecfe1192c775137e3cfcc0689e2ca24140878a9b80f1986c5",
+    "src/client/dashboard.tsx": "49b949d613c703c1a70fd1c9a304691501a3c17bf486afe898f18c85656ace30",
+    "src/client/format.ts": "c34345af3f54bbfdec18c8ad8f1884c954fe6bfbdbf833f0f0fed88fceed739b",
+    "src/client/index.tsx": "3bc1a3b4a83bd6e2cbe01c892e57d6f6b3fd1c6889c232791b2af124ab080794",
+    "src/client/locales.ts": "e1bda980f3958b3aa1df64126acad34dd878acf61789617c9e7076b406f422f2",
+    "src/client/styles.ts": "e8e9adebef27b257d18c300d293808ffc7fa33574601f88ea432e390a153d516",
+    "src/config.ts": "fa7aeb7fa26c21f1fba73bd04fbd01446c8189a9db5a10abfdb1b460fbdb759c",
+    "src/index.ts": "80844bddadc141b210f818cf5530d64becbc8ac0e7fa8cfffd50156095a980ee",
+    "src/shims.d.ts": "0beec5c9ecc91754a0ed98a2f8896dab8c81ebe257285555ee07317116de3e3c",
+    "src/store/day-scan.ts": "e3a502b0091a099acb46c0292909ef98d1aef2e47357c0d9d315982fef6a1ca1",
+    "src/store/day-service.ts": "9079e67a3d30a8f763533cbcca2aabb32cd3a8d2a26dc45a9c0a818d6d7ac225",
+    "src/store/decode.ts": "6e316e51f06ae49110c7e4c060204e4cdc351c0440538f2706b74e2d3c252a4c",
+    "src/store/zstd-dictionary.bin": "dad18fa0247a8fdd886a62d8552eabd36cbd50c25af172873080d2f0ae770d17"
+  }
+}

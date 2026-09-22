@@ -10,8 +10,8 @@
  * @module dsh-token-perf/tests/manifest
  */
 import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
@@ -184,5 +184,39 @@ describe('committed build artifacts', () => {
     expect(host).toContain('dsh-token-perf')
     expect(host).toMatch(/export\s*\{[^}]*\bapply\b/)
     expect(host).toMatch(/export\s*\{[^}]*\bConfig\b/)
+  })
+})
+
+describe('committed artifacts are not stale', () => {
+  /**
+   * `lib/` is what a git install loads, so a source edit that never reached it
+   * ships as a defect. The build records the digest of every source file it
+   * consumed; recomputing it here fails the suite when the two diverge.
+   */
+  const SOURCE = 'src'
+  const FINGERPRINT = 'lib/build-fingerprint.json'
+
+  /** @returns repository-relative POSIX paths of every file under one directory. */
+  function listFiles(directory: string): string[] {
+    const found: string[] = []
+    for (const entry of readdirSync(join(ROOT, directory), { withFileTypes: true, recursive: true })) {
+      if (!entry.isFile()) continue
+      const parent = (entry as { parentPath?: string; path: string }).parentPath ?? entry.path
+      found.push(relative(ROOT, join(parent, entry.name)).split(sep).join('/'))
+    }
+    return found.sort()
+  }
+
+  it('matches the committed build fingerprint', () => {
+    const recorded = JSON.parse(readText(FINGERPRINT)) as { digest: string; files: Record<string, string> }
+    const current = Object.fromEntries(
+      listFiles(SOURCE).map(path => [path, createHash('sha256').update(readFileSync(join(ROOT, path))).digest('hex')]),
+    )
+    expect(recorded.files).toEqual(current)
+    expect(recorded.digest).toBe(
+      createHash('sha256')
+        .update(Object.entries(current).map(([path, hash]) => `${path}\0${hash}\n`).join(''))
+        .digest('hex'),
+    )
   })
 })

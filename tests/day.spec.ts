@@ -201,3 +201,19 @@ describe('resolveHostTimeZone', () => {
     expect(resolveHostTimeZone()).toBe('UTC')
   })
 })
+
+describe('isLocalDayKey domain edges', () => {
+  it('accepts the range a four-digit successor can describe', () => {
+    for (const accepted of ['0001-01-01', '9998-12-31', '2026-09-21']) {
+      expect(isLocalDayKey(accepted), accepted).toBe(true)
+    }
+  })
+
+  it('rejects the years whose successor needs five digits', () => {
+    // 9999-12-31 has no four-digit next day, and the boundary search would
+    // compare "10000-01-01" against it as a smaller string.
+    for (const rejected of ['9999-12-31', '9999-01-01', '0000-12-31']) {
+      expect(isLocalDayKey(rejected), rejected).toBe(false)
+    }
+  })
+})

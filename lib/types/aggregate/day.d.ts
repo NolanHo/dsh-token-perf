@@ -36,7 +36,8 @@ export declare function localDayKey(timeMs: number, timeZone: string): string;
 /**
  * Test whether a string is a well-formed local calendar day.
  * @param value - candidate string.
- * @returns true when the string is `YYYY-MM-DD` and a real date.
+ * @returns true when the string is `YYYY-MM-DD` for a real date between
+ * `0001-01-01` and `9998-12-31` inclusive.
  */
 export declare function isLocalDayKey(value: string): boolean;
 /**

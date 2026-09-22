@@ -44,6 +44,7 @@
     "lib/index.js",
     "lib/client.js",
     "lib/zstd-dictionary.bin",
+    "lib/build-fingerprint.json",
     "lib/types/**/*.d.ts",
     "src",
     "cordis.patch.yml",
@@ -53,7 +54,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "rm -rf lib && tsc -p tsconfig.build.json && tsdown && cp src/store/zstd-dictionary.bin lib/zstd-dictionary.bin",
+    "build": "rm -rf lib && tsc -p tsconfig.build.json && tsdown && cp src/store/zstd-dictionary.bin lib/zstd-dictionary.bin && node scripts/fingerprint.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -143,12 +143,18 @@ export function localDayKey(timeMs: number, timeZone: string): string {
 /**
  * Test whether a string is a well-formed local calendar day.
  * @param value - candidate string.
- * @returns true when the string is `YYYY-MM-DD` and a real date.
+ * @returns true when the string is `YYYY-MM-DD` for a real date between
+ * `0001-01-01` and `9998-12-31` inclusive.
  */
 export function isLocalDayKey(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (match === null) return false
   const year = Number(match[1])
+  // Years outside this range have no four-digit successor or predecessor, so
+  // the day-boundary search would compare a five-digit year against a
+  // four-digit one and return an inverted interval. They are not calendar days
+  // this report can be asked for.
+  if (year < 1 || year > 9998) return false
   const month = Number(match[2])
   const day = Number(match[3])
   const probe = new Date(Date.UTC(year, month - 1, day))

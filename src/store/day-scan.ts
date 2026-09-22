@@ -190,8 +190,8 @@ export async function scanDay(options: ScanOptions): Promise<DayScan> {
       // the host event loop for seconds: measured on the 1.9GB store, one
       // 2026-09-21 window scanned in 5.6s with the loop unresponsive the whole
       // time. Yielding every batch keeps it responsive — the same window now
-      // runs 5.7s with 194 timer ticks and a 266ms longest gap — so a scan
-      // cannot stall the live Session streams it runs beside.
+      // runs 5.8-6.3s with ~459 timer ticks and a 142-439ms longest gap — so a
+      // scan cannot stall the live Session streams it runs beside.
       if (++sinceYield >= YIELD_EVERY_ROWS) {
         sinceYield = 0
         await yieldToLoop()

@@ -1,0 +1,7 @@
+# dsh-token-perf bundle patch: the plugin's own host row, inserted into the
+# profile's plugin stack when the profile bundles this package. The host half
+# serves /api/token-perf/*; the row exists so the profile Loader resolves the
+# entry and the client-bundle scan (dsh.client) serves lib/client.js.
+- insert:
+    - id: token-perf
+      name: 'dsh-token-perf'

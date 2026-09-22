@@ -1,0 +1,4 @@
+allowBuilds:
+  '0': esbuild
+  '1': rolldown
+  esbuild: true

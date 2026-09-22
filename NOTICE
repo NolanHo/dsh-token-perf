@@ -1,0 +1,13 @@
+dsh-token-perf
+Copyright 2026 NolanHo
+
+This product includes software developed by DeepSeek
+(https://github.com/deepseek-ai/deepseek-harness), licensed under the
+MIT License:
+
+  src/store/zstd-dictionary.bin
+      The schema-20 zstd dictionary used by the DeepSeek Harness SQLite
+      session store to compress session-event payloads. Copied verbatim from
+      packages/session/session-persistence-sqlite/resources/zstd-dictionary.bin
+      at deepseek-harness v0.1.5-rc.2 so this plugin can read the store
+      without the harness checkout on disk.

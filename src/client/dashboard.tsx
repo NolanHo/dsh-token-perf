@@ -18,14 +18,18 @@ import { useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react
 import type {
   DayReport,
   DayReportErrorCode,
+  ModelSpeed,
   ModelUsage,
   RateBucket,
   RateStats,
+  RetrySignal,
   SessionUsage,
   SubagentStats,
   TokenBuckets,
+  WorkDay,
 } from '../aggregate/types.ts'
 import { isLocalDayKey, localDayKey, resolveHostTimeZone } from '../aggregate/day.ts'
+import { RetryBadges, SpeedView, WorkPanel } from './charts.tsx'
 import {
   compactCount,
   exactCount,
@@ -206,21 +210,6 @@ const TOKEN_ROWS = [
   ['reasoning', 'tokens.reasoning'],
 ] as const satisfies ReadonlyArray<readonly [keyof TokenBuckets, CopyKey]>
 
-/**
- * Buckets this deployment's providers never report (`cacheWrite`) or report
- * only for some routes (`reasoning`).
- *
- * The wire contract has one number per bucket and no availability flag, so a
- * zero cannot be told apart from "this provider never reports the bucket":
- * `cacheWriteTokens` is absent from all 222,722 stored assistant messages of
- * this deployment and `reasoningTokens` appears only on `deepseek-v4-pro`. A
- * zero for these two therefore renders as "n/a in this deployment" instead of
- * claiming a measured zero; a nonzero reading is always real and renders as one.
- */
-const OPTIONAL_BUCKETS: ReadonlySet<keyof TokenBuckets> = new Set<keyof TokenBuckets>(
-  ['cacheWrite', 'reasoning'],
-)
-
 /** The counter fields `DayTotals` adds to the five buckets. */
 const TOTALS_COUNTERS = [
   'sessionsOpened',
@@ -319,6 +308,10 @@ function isDayReport(value: unknown): value is DayReport {
     && isNumber(value.durationMs)
     && isTotals(value.totals)
     && Array.isArray(value.byModel) && value.byModel.every(isModelUsage)
+    && Array.isArray(value.speed) && value.speed.every(isModelSpeed)
+    && isWorkDay(value.work)
+    && Array.isArray(value.workTrend) && value.workTrend.every(isWorkDay)
+    && Array.isArray(value.retries) && value.retries.every(isRetrySignal)
     && Array.isArray(value.sessions) && value.sessions.every(isSessionUsage)
     && isRate(value.rate)
     && isCompaction(value.compaction)
@@ -347,6 +340,28 @@ function isModelUsage(value: unknown): value is ModelUsage {
   if (!isBuckets(value)) return false
   const usage = value as unknown as Record<string, unknown>
   return typeof usage.provider === 'string' && typeof usage.model === 'string' && isNumber(usage.calls)
+}
+
+/** Whether one value is a speed-view row. */
+function isModelSpeed(value: unknown): value is ModelSpeed {
+  if (!isRecord(value)) return false
+  return typeof value.provider === 'string' && typeof value.model === 'string'
+    && ['steps', 'p50Ms', 'p90Ms', 'outputPerStep'].every(field => isNumber(value[field]))
+}
+
+/** Whether one value is one day of the de-replicated work signal. */
+function isWorkDay(value: unknown): value is WorkDay {
+  if (!isRecord(value)) return false
+  return typeof value.date === 'string'
+    && ['output', 'cacheRead', 'events', 'replicaEvents', 'replicaSessions'].every(field => isNumber(value[field]))
+}
+
+/** Whether one value is a retry threshold row. */
+function isRetrySignal(value: unknown): value is RetrySignal {
+  if (!isRecord(value)) return false
+  return typeof value.provider === 'string' && typeof value.model === 'string'
+    && typeof value.triggered === 'boolean'
+    && ['settled', 'retried', 'share', 'wilsonLower'].every(field => isNumber(value[field]))
 }
 
 /** Whether one value is a session table row. */
@@ -712,17 +727,20 @@ export function Dashboard(props: DashboardProps): ReactNode {
 }
 
 /**
- * The loaded day: every panel of the report in reading order.
+ * The loaded day: the P0 charts first — the retry badge row when a window
+ * triggered, the speed view, and the de-replicated work panel — then the tables
+ * and panels that carry the rest of the report.
  * @param props - copy resolver and the day's report.
  * @returns the report body.
  */
 function DayReportView({ copy, report }: { copy: Translator; report: DayReport }): ReactNode {
-  const dayTotal = totalTokens(report.totals)
   return (
     <div className={cx(`${PREFIX}-body`)}>
+      <RetryBadges copy={copy} retries={report.retries} />
+      <SpeedView copy={copy} speeds={report.speed} />
+      <WorkPanel copy={copy} work={report.work} trend={report.workTrend} />
       <SummaryCards copy={copy} report={report} />
-      <TokenComposition copy={copy} buckets={report.totals} />
-      <ModelTable copy={copy} models={report.byModel} dayTotal={dayTotal} />
+      <ModelTable copy={copy} models={report.byModel} dayTotal={totalTokens(report.totals)} />
       <RateChart copy={copy} rate={report.rate} />
       <SubagentPanel copy={copy} stats={report.subagents} />
       <SessionTable copy={copy} sessions={report.sessions} timeZone={report.timezone} />
@@ -745,18 +763,11 @@ interface SummaryCard {
  */
 function SummaryCards({ copy, report }: { copy: Translator; report: DayReport }): ReactNode {
   const totals = report.totals
-  const dayTotal = totalTokens(totals)
   // `sessionsOpened` counts root and subagent alike, so the root split is the
   // remainder; the clamp keeps a host that reported them inconsistently from
   // rendering a negative session count.
   const rootSessions = Math.max(0, totals.sessionsOpened - totals.subagents)
   const cards: readonly SummaryCard[] = [
-    {
-      id: 'tokens',
-      title: copy('summary.totalTokens'),
-      value: compactCount(dayTotal),
-      detail: copy('summary.exactCount', { count: exactCount(dayTotal) }),
-    },
     {
       id: 'opened',
       title: copy('summary.sessionsOpened'),
@@ -812,52 +823,6 @@ function SummaryCards({ copy, report }: { copy: Translator; report: DayReport })
           </li>
         ))}
       </ul>
-    </section>
-  )
-}
-
-/**
- * The five buckets as one share bar plus their numbers.
- * @param props - copy resolver and the day's buckets.
- * @returns the composition section.
- */
-function TokenComposition({ copy, buckets }: { copy: Translator; buckets: TokenBuckets }): ReactNode {
-  const total = totalTokens(buckets)
-  const rows = TOKEN_ROWS.map(([bucket, key]) => ({ bucket, key, value: buckets[bucket] }))
-  const segments = rows.filter(row => row.value > 0)
-  return (
-    <section className={cx(`${PREFIX}-section`)}>
-      <h3 className={cx(`${PREFIX}-sectionTitle`)}>{copy('tokens.title')}</h3>
-      <div className={cx(`${PREFIX}-bar`)} role="img" aria-label={copy('tokens.title')}>
-        {segments.length === 0
-          ? <span className={cx(`${PREFIX}-barSegment`, `${PREFIX}-barEmpty`)} style={{ width: '100%' }} />
-          : segments.map(row => (
-              <span
-                key={row.bucket}
-                className={cx(`${PREFIX}-barSegment`)}
-                data-bucket={row.bucket}
-                style={{ width: `${sharePercent(row.value, total)}%` }}
-                title={`${copy(row.key)} ${percentLabel(row.value, total)}`}
-              />
-            ))}
-      </div>
-      <ul className={cx(`${PREFIX}-rows`)}>
-        {rows.map(row => {
-          const reported = row.value > 0 || !OPTIONAL_BUCKETS.has(row.bucket)
-          return (
-            <li key={row.bucket} className={cx(`${PREFIX}-row`)}>
-              <span className={cx(`${PREFIX}-rowLabel`)} data-bucket={row.bucket}>{copy(row.key)}</span>
-              <span className={cx(`${PREFIX}-rowValue`)}>
-                {reported ? exactCount(row.value) : copy('tokens.unavailable')}
-              </span>
-              <span className={cx(`${PREFIX}-rowShare`)}>
-                {reported ? percentLabel(row.value, total) : ''}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-      <p className={cx(`${PREFIX}-note`)}>{copy('tokens.total')} {exactCount(total)}</p>
     </section>
   )
 }

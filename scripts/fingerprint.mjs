@@ -31,8 +31,17 @@ function listFiles(directory) {
   return found.sort()
 }
 
+/**
+ * Everything the build reads: this package's sources plus the two configs that
+ * decide how they are compiled. A change to either without a rebuild leaves an
+ * artifact the fingerprint test then rejects.
+ */
+const INPUTS = ['tsdown.config.ts', 'tsconfig.build.json']
+
 const files = Object.fromEntries(
-  listFiles(SOURCE).map(path => [path, createHash('sha256').update(readFileSync(join(ROOT, path))).digest('hex')]),
+  [...listFiles(SOURCE), ...INPUTS].sort().map(
+    path => [path, createHash('sha256').update(readFileSync(join(ROOT, path))).digest('hex')],
+  ),
 )
 const digest = createHash('sha256')
   .update(Object.entries(files).map(([path, hash]) => `${path}\0${hash}\n`).join(''))

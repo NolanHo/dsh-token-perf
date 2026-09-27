@@ -8,6 +8,12 @@
  * re-scanned once its lifetime expires, and a lifetime of zero disables
  * retention entirely. Concurrent requests for one key await the same scan, and
  * a failed scan is never retained.
+ *
+ * The report's seven-day trend costs one more window pass over the six earlier
+ * days: a work-only scan that decodes settlements alone and buckets its rows by
+ * local day, so the six days cost one whole-table pass instead of six. It runs
+ * after the day's own scan, sequentially, and yields to the event loop the same
+ * way that pass does.
  * @module dsh-token-perf/store/day-service
  */
 import type { DayReportResponse } from '../aggregate/types.ts';

@@ -140,6 +140,61 @@ export interface DayTotals extends TokenBuckets {
   llmCalls: number
 }
 
+/** Per-route step latency and throughput: the speed view's data. */
+export interface ModelSpeed {
+  /** Provider half of the route, `unknown` when no sample carried one. */
+  provider: string
+  /** Model half of the route, `unknown` when no sample carried one. */
+  model: string
+  /** Settled steps with a measurable duration; the distribution's sample size. */
+  steps: number
+  /**
+   * Median step latency in milliseconds: the order statistic at index
+   * `floor(steps * 0.5)`, clamped into range. This is the analysis
+   * convention this plugin is cross-checked against, not textbook
+   * nearest-rank, which can differ by one order statistic.
+   */
+  p50Ms: number
+  /** 90th-percentile step latency, at index `floor(steps * 0.9)`, clamped. */
+  p90Ms: number
+  /** Mean output tokens per settled step; a ratio, not a latency. */
+  outputPerStep: number
+}
+
+/** One day's de-replicated work signal. */
+export interface WorkDay {
+  /** Local calendar day, `YYYY-MM-DD`. */
+  date: string
+  /** Output tokens: the work signal. */
+  output: number
+  /** Prompt tokens served from cache: context re-reading, drawn as background. */
+  cacheRead: number
+  /** In-window events after prefix-replica sessions are removed. */
+  events: number
+  /** In-window events that belong to prefix-replica sessions. */
+  replicaEvents: number
+  /** Sessions identified as prefix replicas of another session that day. */
+  replicaSessions: number
+}
+
+/** Retry-rate threshold signal for one `(day, route)` window. */
+export interface RetrySignal {
+  /** Provider half of the route, `unknown` when no sample carried one. */
+  provider: string
+  /** Model half of the route. */
+  model: string
+  /** Settled model calls in the window; the denominator. */
+  settled: number
+  /** Calls a retry restarted inside the window. */
+  retried: number
+  /** `retried / settled`. */
+  share: number
+  /** Wilson score interval lower bound at 95%. */
+  wilsonLower: number
+  /** Whether the signal crossed both the sample-size and share thresholds. */
+  triggered: boolean
+}
+
 /** One local calendar day of token, message, tool, and session activity. */
 export interface DayReport {
   /** Local calendar day the report covers, `YYYY-MM-DD`. */
@@ -161,6 +216,14 @@ export interface DayReport {
   totals: DayTotals
   /** Per-route usage, descending by total tokens. */
   byModel: ModelUsage[]
+  /** Per-route step latency and throughput, descending by `steps`. */
+  speed: ModelSpeed[]
+  /** This day's de-replicated work signal. */
+  work: WorkDay
+  /** Trailing seven local days ending at `date`, oldest first. */
+  workTrend: WorkDay[]
+  /** Retry signals that crossed the threshold, descending by `wilsonLower`. */
+  retries: RetrySignal[]
   /** Per-session usage, descending by total tokens. */
   sessions: SessionUsage[]
   /** Token consumption rate. */

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { localDayBounds } from '../src/aggregate/day.ts'
 import { buildDayReport } from '../src/aggregate/report.ts'
-import type { DayReport, TokenBuckets } from '../src/aggregate/types.ts'
-import type { DayScan, ScannedEvent, ScannedSession } from '../src/store/day-scan.ts'
+import type { DayReport, TokenBuckets, WorkDay } from '../src/aggregate/types.ts'
+import type { DayScan, ScannedEvent, ScannedSession, WorkScan } from '../src/store/day-scan.ts'
 
 const DATE = '2026-09-21'
 const TIMEZONE = 'America/Los_Angeles'
@@ -63,10 +63,43 @@ function attempt(
   })
 }
 
+/** One step's start, the instant its settlement's latency is measured from. */
+function stepStart(sessionId: number, seq: number, turn: number, step: number, time: number): ScannedEvent {
+  return event(sessionId, seq, 'step/start', time, { turn, step })
+}
+
+/** One retry of a step; the payload carries no route, like the store's own record. */
+function retry(sessionId: number, seq: number, turn: number, step: number, time: number, index = 1): ScannedEvent {
+  return event(sessionId, seq, 'llm/retry-started', time, { retryId: `r-${seq}-${index}`, turn, step, retry: index })
+}
+
+/** @returns a work signal with nothing in it. */
+function emptyWork(): WorkScan {
+  return { events: 0, replicaEvents: 0, replicaSessions: 0, output: 0, cacheRead: 0 }
+}
+
 /** @returns the report for one synthetic day. */
-function build(sessions: ScannedSession[], events: ScannedEvent[]): DayReport {
-  const scan: DayScan = { sessions, events, skippedEvents: 0, scannedAt: 1 }
-  return buildDayReport({ scan, date: DATE, timezone: TIMEZONE, generatedAt: 2, durationMs: 3 })
+function build(
+  sessions: ScannedSession[],
+  events: ScannedEvent[],
+  overrides: { work?: WorkScan; previousWork?: WorkDay[]; retryThresholdShare?: number } = {},
+): DayReport {
+  const scan: DayScan = {
+    sessions,
+    events,
+    skippedEvents: 0,
+    work: overrides.work ?? emptyWork(),
+    scannedAt: 1,
+  }
+  return buildDayReport({
+    scan,
+    date: DATE,
+    timezone: TIMEZONE,
+    generatedAt: 2,
+    durationMs: 3,
+    previousWork: overrides.previousWork ?? [],
+    retryThresholdShare: overrides.retryThresholdShare ?? 0.1,
+  })
 }
 
 /** @returns the day report's own token total for one bucket set. */
@@ -217,6 +250,11 @@ describe('buildDayReport counters and rate', () => {
     expect(report.totals.sessionsActive).toBe(0)
     expect(report.rate).toMatchObject({ peakPerMinute: 0, avgPerActiveMinute: 0, activeMinutes: 0, spanMinutes: 0 })
     expect(report.rate.buckets.every(bucket => bucket.tokens === 0 && bucket.calls === 0)).toBe(true)
+    expect(report.speed).toEqual([])
+    expect(report.retries).toEqual([])
+    // A day with no events still reports the seven-day window, its own row last.
+    expect(report.work).toEqual({ date: DATE, output: 0, cacheRead: 0, events: 0, replicaEvents: 0, replicaSessions: 0 })
+    expect(report.workTrend).toEqual([report.work])
   })
 })
 
@@ -417,6 +455,238 @@ describe('buildDayReport route attribution', () => {
     expect(report.totals.input).toBe(150)
     expect(report.byModel).toEqual([
       { ...ROUTE_A, input: 150, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, calls: 1 },
+    ])
+  })
+})
+
+describe('buildDayReport step latency', () => {
+  it('selects the percentiles the reference script selects', () => {
+    const events: ScannedEvent[] = []
+    // Ten settled steps, 100ms apart. The script's rule — index floor(n × q) on
+    // the ascending sample — takes the sixth and the tenth; the textbook
+    // nearest rank ceil(q × n) would take the fifth and the ninth.
+    for (let index = 1; index <= 10; index += 1) {
+      const start = bounds.start + HOUR
+      events.push(stepStart(1, index * 2 - 1, 1, index, start))
+      events.push(message(1, index * 2, 1, index, start + index * 100, { outputTokens: 10 }))
+    }
+
+    const report = build([header(1, 'session-a')], events)
+
+    expect(report.speed).toEqual([
+      { provider: 'pai-ds', model: 'deepseek-flash', steps: 10, p50Ms: 600, p90Ms: 1_000, outputPerStep: 10 },
+    ])
+    // The wire carries quantiles and a sample size, never a latency mean.
+    expect(Object.keys(report.speed[0] ?? {})).toEqual([
+      'provider', 'model', 'steps', 'p50Ms', 'p90Ms', 'outputPerStep',
+    ])
+    expect(report.speed[0]?.p90Ms).toBeGreaterThanOrEqual(report.speed[0]?.p50Ms ?? 0)
+  })
+
+  it('reports a route-less settlement as the unknown row', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        stepStart(1, 1, 1, 1, bounds.start + HOUR),
+        event(1, 2, 'assistant/message', bounds.start + HOUR + 250, {
+          turn: 1,
+          step: 1,
+          message: {},
+          usage: { outputTokens: 5 },
+          stream: [],
+        }),
+        stepStart(1, 3, 1, 2, bounds.start + HOUR + 1_000),
+        message(1, 4, 1, 2, bounds.start + HOUR + 1_400, { outputTokens: 7 }, { provider: 'zhipu-official', model: 'glm-5.3' }),
+      ],
+    )
+
+    expect(report.speed).toEqual([
+      { provider: 'unknown', model: 'unknown', steps: 1, p50Ms: 250, p90Ms: 250, outputPerStep: 5 },
+      { provider: 'zhipu-official', model: 'glm-5.3', steps: 1, p50Ms: 400, p90Ms: 400, outputPerStep: 7 },
+    ])
+  })
+
+  it('samples only the steps a settlement closed inside the day', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        // Started but never settled here: no measurement, no sample.
+        stepStart(1, 1, 1, 1, bounds.start + HOUR),
+        // Settled without a start: tokens count, latency does not.
+        message(1, 2, 2, 1, bounds.start + HOUR + 1_000, { inputTokens: 100, outputTokens: 9 }),
+        stepStart(1, 3, 3, 1, bounds.start + HOUR + 2_000),
+        message(1, 4, 3, 1, bounds.start + HOUR + 2_500, { inputTokens: 100, outputTokens: 9 }),
+      ],
+    )
+
+    expect(report.speed).toEqual([
+      { provider: 'pai-ds', model: 'deepseek-flash', steps: 1, p50Ms: 500, p90Ms: 500, outputPerStep: 9 },
+    ])
+    expect(report.totals.output).toBe(18)
+  })
+})
+
+describe('buildDayReport retry signal', () => {
+  const ROUTE_A = { provider: 'pai-ds', model: 'deepseek-flash' }
+  const ROUTE_B = { provider: 'zhipu-official', model: 'glm-5.3' }
+
+  /** @returns `calls` distinct settled messages on one route. */
+  function settledCalls(
+    sessionId: number,
+    route: { provider: string; model: string },
+    calls: number,
+    firstSeq: number,
+    firstTime: number,
+    turn = 1,
+  ): ScannedEvent[] {
+    const events: ScannedEvent[] = []
+    for (let index = 0; index < calls; index += 1) {
+      events.push(message(sessionId, firstSeq + index, turn, index + 1, firstTime + index * 1_000, { outputTokens: 1 }, route))
+    }
+    return events
+  }
+
+  it('gates on the settled-call sample size at n = 100', () => {
+    const below = build(
+      [header(1, 'session-a')],
+      [
+        ...settledCalls(1, ROUTE_A, 99, 1, bounds.start + HOUR),
+        retry(1, 100, 1, 1, bounds.start + 2 * HOUR),
+      ],
+      { retryThresholdShare: 0 },
+    )
+    expect(below.retries).toEqual([])
+
+    const at = build(
+      [header(1, 'session-a')],
+      [
+        ...settledCalls(1, ROUTE_A, 100, 1, bounds.start + HOUR),
+        retry(1, 101, 1, 1, bounds.start + 2 * HOUR),
+      ],
+      { retryThresholdShare: 0 },
+    )
+    expect(at.retries).toHaveLength(1)
+    expect(at.retries[0]).toMatchObject({
+      provider: 'pai-ds', model: 'deepseek-flash', settled: 100, retried: 1, share: 0.01, triggered: true,
+    })
+    expect(at.retries[0]?.wilsonLower).toBeCloseTo(0.001767, 6)
+  })
+
+  it('compares the Wilson lower bound, not the observed share, against the threshold', () => {
+    const atThreshold = build(
+      [header(1, 'session-a')],
+      [
+        ...settledCalls(1, ROUTE_A, 100, 1, bounds.start + HOUR),
+        ...Array.from({ length: 10 }, (_unused, index) => retry(1, 101 + index, 1, index + 1, bounds.start + 2 * HOUR + index * 1_000)),
+      ],
+    )
+    // share 0.10 with n = 100 bounds at 0.055: the observed share alone would
+    // cross the default threshold, the bound does not.
+    expect(atThreshold.totals.llmCalls).toBe(100)
+    expect(atThreshold.retries).toEqual([])
+
+    const above = build([header(1, 'session-a')], [
+      ...settledCalls(1, ROUTE_A, 100, 1, bounds.start + HOUR),
+      ...Array.from({ length: 20 }, (_unused, index) => retry(1, 101 + index, 1, index + 1, bounds.start + 2 * HOUR + index * 1_000)),
+    ])
+
+    expect(above.retries).toHaveLength(1)
+    expect(above.retries[0]).toMatchObject({
+      provider: 'pai-ds', model: 'deepseek-flash', settled: 100, retried: 20, share: 0.2, triggered: true,
+    })
+    expect(above.retries[0]?.wilsonLower).toBeCloseTo(0.133366, 6)
+  })
+
+  it('counts settlement samples, not distinct slots, in the denominator', () => {
+    const events: ScannedEvent[] = [
+      // Seed the session's route, then let each attempt stream refine the
+      // sample of the step before it: 101 samples over 51 replacement slots.
+      message(1, 1, 1, 1, bounds.start + HOUR, { outputTokens: 5 }),
+    ]
+    for (let index = 1; index <= 50; index += 1) {
+      events.push(attempt(1, index * 2, 1, index + 1, bounds.start + HOUR + index * 1_000, { outputTokens: 5 }))
+      events.push(message(1, index * 2 + 1, 1, index + 1, bounds.start + HOUR + index * 1_000 + 500, { outputTokens: 5 }))
+    }
+    events.push(retry(1, 102, 1, 1, bounds.start + 2 * HOUR))
+
+    const report = build([header(1, 'session-a')], events, { retryThresholdShare: 0 })
+
+    // A slot-only count of 51 would stay below the sample gate; the reference
+    // script's denominator counts every settlement sample, so this route is
+    // eligible and its bound is the one a 1-in-101 share supports.
+    expect(report.retries).toHaveLength(1)
+    expect(report.retries[0]).toMatchObject({
+      provider: 'pai-ds', model: 'deepseek-flash', settled: 101, retried: 1, share: 1 / 101, triggered: true,
+    })
+    expect(report.retries[0]?.wilsonLower).toBeCloseTo(0.00175, 5)
+  })
+
+  it('charges a retry to the route the session last addressed', () => {
+    const report = build(
+      [header(1, 'session-a')],
+      [
+        ...settledCalls(1, ROUTE_A, 100, 1, bounds.start + HOUR),
+        // The only record of the switch: the retry itself names no route.
+        event(1, 101, 'request/context', bounds.start + 2 * HOUR, { provider: 'zhipu-official', model: 'glm-5.3' }),
+        retry(1, 102, 1, 1, bounds.start + 2 * HOUR + 1_000),
+        ...settledCalls(1, ROUTE_B, 100, 103, bounds.start + 3 * HOUR, 2),
+      ],
+      { retryThresholdShare: 0 },
+    )
+
+    expect(report.retries.map(row => [`${row.provider}:${row.model}`, row.settled, row.retried])).toEqual([
+      ['zhipu-official:glm-5.3', 100, 1],
+      ['pai-ds:deepseek-flash', 100, 0],
+    ])
+  })
+
+  it('ranks the signalled routes by their lower bound', () => {
+    const report = build([header(1, 'session-a')], [
+      ...settledCalls(1, ROUTE_A, 100, 1, bounds.start + HOUR),
+      ...Array.from({ length: 40 }, (_unused, index) => retry(1, 101 + index, 1, index + 1, bounds.start + 2 * HOUR + index * 1_000)),
+      // The switch record, so the next retries are charged to the other route.
+      event(1, 141, 'request/context', bounds.start + 3 * HOUR, { provider: 'zhipu-official', model: 'glm-5.3' }),
+      ...settledCalls(1, ROUTE_B, 100, 142, bounds.start + 3 * HOUR + 1_000, 2),
+      ...Array.from({ length: 20 }, (_unused, index) => retry(1, 242 + index, 2, index + 1, bounds.start + 4 * HOUR + index * 1_000)),
+    ])
+
+    expect(report.retries.map(row => [`${row.provider}:${row.model}`, row.retried])).toEqual([
+      ['pai-ds:deepseek-flash', 40],
+      ['zhipu-official:glm-5.3', 20],
+    ])
+    expect(report.retries[0]?.wilsonLower).toBeGreaterThan(report.retries[1]?.wilsonLower ?? 1)
+  })
+})
+
+describe('buildDayReport work and trend', () => {
+  it('appends the day\u2019s own work row to the six earlier ones', () => {
+    const previous: WorkDay[] = Array.from({ length: 6 }, (_unused, index) => ({
+      date: `2026-09-${String(15 + index).padStart(2, '0')}`,
+      output: 100 + index,
+      cacheRead: 1_000 + index,
+      events: 10 + index,
+      replicaEvents: index,
+      replicaSessions: index % 2,
+    }))
+
+    const report = build([], [], {
+      work: { events: 40, replicaEvents: 4, replicaSessions: 1, output: 700, cacheRead: 9_000 },
+      previousWork: previous,
+    })
+
+    expect(report.work).toEqual({
+      date: DATE,
+      output: 700,
+      cacheRead: 9_000,
+      events: 40,
+      replicaEvents: 4,
+      replicaSessions: 1,
+    })
+    expect(report.workTrend).toHaveLength(7)
+    expect(report.workTrend.slice(0, 6)).toEqual(previous)
+    expect(report.workTrend[6]).toEqual(report.work)
+    expect(report.workTrend.map(day => day.date)).toEqual([
+      '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20', '2026-09-21',
     ])
   })
 })

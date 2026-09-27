@@ -98,34 +98,57 @@ const RULES = `
 .${PREFIX}-cardValue { font-size: 18px; line-height: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .${PREFIX}-cardDetail { color: var(--dsw-alias-label-secondary); font-size: var(--dsw-font-xxs-12, 12px); font-variant-numeric: tabular-nums; }
 
-.${PREFIX}-bar {
-  display: flex; width: 100%; height: 12px;
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-layer-3);
-}
-.${PREFIX}-barSegment { display: block; height: 100%; min-width: 1px; }
-.${PREFIX}-barSegment[data-bucket='input'] { background: var(--dsw-alias-state-business-primary); }
-.${PREFIX}-barSegment[data-bucket='output'] { background: var(--dsw-alias-state-success-primary); }
-.${PREFIX}-barSegment[data-bucket='cacheRead'] { background: var(--dsw-alias-brand-primary); }
-.${PREFIX}-barSegment[data-bucket='cacheWrite'] { background: var(--dsw-alias-state-warn-primary); }
-.${PREFIX}-barSegment[data-bucket='reasoning'] { background: var(--dsw-alias-state-error-primary); }
-.${PREFIX}-barEmpty { background: var(--dsw-alias-border-l2); }
-
 .${PREFIX}-rows { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .${PREFIX}-row { display: flex; align-items: center; gap: 8px; }
 .${PREFIX}-rowLabel { flex: 1; min-width: 0; }
-.${PREFIX}-rowValue { font-variant-numeric: tabular-nums; }
-.${PREFIX}-rowShare { width: 64px; text-align: right; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
-.${PREFIX}-rowLabel[data-bucket]::before {
-  content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
-  border-radius: 2px; background: var(--dsw-alias-border-l2); vertical-align: middle;
+
+.${PREFIX}-speed { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+/* Header and rows share one grid: the labels sit over the six columns they name.
+   The route column keeps a floor and the larger share of the flexible width:
+   at the settings panel's narrowest usable width a routed name is the one cell
+   that must stay legible, and the numeric columns are three characters wide. */
+.${PREFIX}-speedHead, .${PREFIX}-speedRow {
+  display: grid; align-items: center; gap: 6px;
+  grid-template-columns: minmax(128px, 2fr) minmax(48px, 1fr) 52px 52px 50px 62px;
 }
-.${PREFIX}-rowLabel[data-bucket='input']::before { background: var(--dsw-alias-state-business-primary); }
-.${PREFIX}-rowLabel[data-bucket='output']::before { background: var(--dsw-alias-state-success-primary); }
-.${PREFIX}-rowLabel[data-bucket='cacheRead']::before { background: var(--dsw-alias-brand-primary); }
-.${PREFIX}-rowLabel[data-bucket='cacheWrite']::before { background: var(--dsw-alias-state-warn-primary); }
-.${PREFIX}-rowLabel[data-bucket='reasoning']::before { background: var(--dsw-alias-state-error-primary); }
+.${PREFIX}-speedHead {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsw-font-xxs-12, 12px);
+}
+/* Wrap rather than truncate: an ellipsised provider prefix cannot be told from
+   another route of the same provider, which is the one thing this column is for. */
+.${PREFIX}-speedRoute { overflow-wrap: anywhere; line-height: 1.25; }
+.${PREFIX}-barTrack { position: relative; height: 12px; border-radius: 6px; background: var(--dsw-alias-bg-layer-3); }
+.${PREFIX}-barFill { display: block; height: 100%; border-radius: 6px; background: var(--dsw-alias-state-business-primary); }
+.${PREFIX}-barFill[data-base] { position: absolute; left: 0; bottom: 0; height: 2px; border-radius: 0; background: var(--dsw-alias-state-warn-primary); }
+.${PREFIX}-speedWhisker { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--dsw-alias-label-primary); }
+
+.${PREFIX}-work { display: flex; flex-direction: column; gap: 8px; }
+.${PREFIX}-workRow { display: grid; align-items: center; gap: 8px; grid-template-columns: minmax(0, 200px) minmax(80px, 1fr) 112px; }
+.${PREFIX}-trend { display: grid; align-items: end; gap: 4px 8px; grid-template-columns: minmax(0, 200px) minmax(80px, 1fr); }
+.${PREFIX}-trendBars { display: grid; align-items: end; gap: 4px; height: 64px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+/* The shared date axis repeats the multiples' seven-column track, so each tick sits under its bar. */
+.${PREFIX}-trendAxis { display: grid; align-items: center; gap: 4px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.${PREFIX}-trendTick {
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.${PREFIX}-barFill[data-metric='output'], .${PREFIX}-trendBars[data-metric='output'] .${PREFIX}-barFill {
+  background: var(--dsw-alias-state-success-primary);
+}
+.${PREFIX}-barFill[data-metric='cacheRead'], .${PREFIX}-trendBars[data-metric='cacheRead'] .${PREFIX}-barFill {
+  background: var(--dsw-alias-brand-primary);
+}
+
+.${PREFIX}-retry { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.${PREFIX}-retryBadge {
+  display: inline-block; padding: 0 8px; border-radius: 999px;
+  border: 0.5px solid var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-label-primary);
+  font-size: var(--dsw-font-xxs-12, 12px); line-height: 20px; font-variant-numeric: tabular-nums;
+}
 
 .${PREFIX}-chart {
   display: grid; grid-template-columns: repeat(24, minmax(0, 1fr));

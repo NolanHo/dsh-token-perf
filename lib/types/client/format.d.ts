@@ -49,6 +49,13 @@ export declare function sharePercent(part: number, total: number): number;
  */
 export declare function percentLabel(part: number, total: number): string;
 /**
+ * A mark's width in percent of its own track, clamped to that track.
+ * @param value - the value the mark encodes.
+ * @param max - the largest value on this mark's own scale.
+ * @returns the width in percent, `0` when the scale has no positive maximum.
+ */
+export declare function barPercent(value: number, max: number): number;
+/**
  * Two-digit label for one local hour of the rate chart.
  * @param hour - hour of day, 0 through 23.
  * @returns the zero-padded hour.

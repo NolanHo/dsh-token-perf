@@ -8,6 +8,12 @@
  * re-scanned once its lifetime expires, and a lifetime of zero disables
  * retention entirely. Concurrent requests for one key await the same scan, and
  * a failed scan is never retained.
+ *
+ * The report's seven-day trend costs one more window pass over the six earlier
+ * days: a work-only scan that decodes settlements alone and buckets its rows by
+ * local day, so the six days cost one whole-table pass instead of six. It runs
+ * after the day's own scan, sequentially, and yields to the event loop the same
+ * way that pass does.
  * @module dsh-token-perf/store/day-service
  */
 
@@ -15,9 +21,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { isLocalDayKey, localDayBounds, localDayKey, resolveHostTimeZone } from '../aggregate/day.ts'
 import { buildDayReport } from '../aggregate/report.ts'
-import type { DayReportResponse } from '../aggregate/types.ts'
+import type { DayReportResponse, WorkDay } from '../aggregate/types.ts'
 import { DEFAULT_DICTIONARY_PATH, type Config } from '../config.ts'
-import { ScanError, scanDay } from './day-scan.ts'
+import { ScanError, scanDay, scanWorkDays } from './day-scan.ts'
 
 /**
  * Resolve which SQLite session store one report reads.
@@ -77,9 +83,11 @@ export function getDayReport(date: string | undefined, config: Config): Promise<
   const databasePath = resolveDatabasePath(config)
   const dictionaryPath = config.dictionaryPath ?? DEFAULT_DICTIONARY_PATH
   const ttl = config.cacheTtlMs
+  const retryThresholdShare = config.retryThresholdShare
   // Every input that changes the response is part of the key: a second store,
-  // dictionary, or zone under the same date must not answer from the first.
-  const key = [day, databasePath, dictionaryPath, timezone].join('\u0000')
+  // dictionary, zone, or retry threshold under the same date must not answer
+  // from the first.
+  const key = [day, databasePath, dictionaryPath, timezone, String(retryThresholdShare)].join('\u0000')
   const cached = ttl > 0 ? cache.get(key) : undefined
   if (cached !== undefined) {
     if (cached.expiresAt > now) return Promise.resolve(cached.response)
@@ -88,7 +96,7 @@ export function getDayReport(date: string | undefined, config: Config): Promise<
   const pending = inFlight.get(key)
   if (pending !== undefined) return pending
   let promise: Promise<DayReportResponse>
-  promise = produceReport(day, timezone, databasePath, dictionaryPath, now).then((response) => {
+  promise = produceReport(day, timezone, databasePath, dictionaryPath, retryThresholdShare, now).then((response) => {
     if (inFlight.get(key) === promise) {
       inFlight.delete(key)
       // A failure is never retained: a store that is missing or busy now may
@@ -115,6 +123,7 @@ export function getDayReport(date: string | undefined, config: Config): Promise<
  * @param timezone - IANA zone the day's window is taken in.
  * @param databasePath - session store to read.
  * @param dictionaryPath - zstd dictionary the store's payloads were compressed with.
+ * @param retryThresholdShare - retry share a route's Wilson lower bound must reach to be signalled.
  * @param startedAt - instant the report's production began, epoch milliseconds.
  * @returns the frozen wire envelope.
  */
@@ -123,17 +132,21 @@ async function produceReport(
   timezone: string,
   databasePath: string,
   dictionaryPath: string,
+  retryThresholdShare: number,
   startedAt: number,
 ): Promise<DayReportResponse> {
   try {
     const { start, end } = localDayBounds(day, timezone)
     const scan = await scanDay({ databasePath, dictionaryPath, start, end })
+    const previousWork = await scanPreviousWork(day, timezone, databasePath, dictionaryPath)
     const report = buildDayReport({
       scan,
       date: day,
       timezone,
       generatedAt: startedAt,
       durationMs: Date.now() - startedAt,
+      previousWork,
+      retryThresholdShare,
     })
     return deepFreeze<DayReportResponse>({ ok: true, report })
   } catch (error) {
@@ -143,6 +156,57 @@ async function produceReport(
       message: error instanceof Error ? error.message : String(error),
     })
   }
+}
+
+/** Local days the trend covers, the reported day included. */
+const TREND_DAYS = 7
+
+/**
+ * Scan the six local days before one report's day.
+ *
+ * They are read in one contiguous pass over `[day-6 00:00, day 00:00)`: the
+ * store has no index on `events.time`, so a windowed read costs a whole-table
+ * pass whatever its width, and the fold buckets the rows by local day to report
+ * each day's own de-replicated signal. The day itself is not part of this
+ * window — the report's own scan already folds it while decoding its events,
+ * and a bucket for it here would decode the busiest day's settlements twice for
+ * a row nothing reads.
+ * @param day - `YYYY-MM-DD` local day the report covers.
+ * @param timezone - IANA zone the day boundaries are resolved in.
+ * @param databasePath - session store to read.
+ * @param dictionaryPath - zstd dictionary the store's payloads were compressed with.
+ * @returns the earlier days' work signals, oldest first.
+ * @throws {ScanError} when the store read fails.
+ */
+async function scanPreviousWork(
+  day: string,
+  timezone: string,
+  databasePath: string,
+  dictionaryPath: string,
+): Promise<WorkDay[]> {
+  return scanWorkDays({
+    databasePath,
+    dictionaryPath,
+    timeZone: timezone,
+    start: localDayBounds(trendStartDay(day, timezone), timezone).start,
+    end: localDayBounds(day, timezone).start,
+  })
+}
+
+/**
+ * The local day the trend's window opens on: six local days before `day`.
+ * @param day - `YYYY-MM-DD` local day the report covers.
+ * @param timezone - IANA zone the day boundaries are resolved in.
+ * @returns the sixth local day before `day`.
+ */
+function trendStartDay(day: string, timezone: string): string {
+  let cursor = day
+  for (let index = 1; index < TREND_DAYS; index += 1) {
+    // One millisecond before a local midnight is always the previous local day,
+    // whatever the zone's offset does across the boundary.
+    cursor = localDayKey(localDayBounds(cursor, timezone).start - 1, timezone)
+  }
+  return cursor
 }
 
 /**

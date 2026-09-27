@@ -10,6 +10,7 @@
  */
 import type { UserConfig } from 'tsdown'
 import { builtinModules } from 'node:module'
+import { fileURLToPath } from 'node:url'
 
 const NODE_BUILTINS = new Set([
   ...builtinModules,
@@ -32,6 +33,9 @@ const CLIENT_EXTERNALS = [
   '@deepseek-ai/dsh-client-ui-dockkit',
 ]
 
+/** Absolute prefix of this package's own sources, shared by both faces. */
+const SOURCE_ROOT = fileURLToPath(new URL('src/', import.meta.url))
+
 /** Every require() the emitted client bundle is allowed to keep. */
 const REQUIRE_PATTERN = /\brequire\(\s*["']([^"']+)["']\s*\)/g
 
@@ -50,10 +54,31 @@ const purityGate = {
       `client bundle purity: "${source}" is not a platform module (CLIENT_EXTERNALS) — value imports are forbidden; collaborate through cordis services`,
     )
   },
-  generateBundle(_options: unknown, bundle: Record<string, { type: string; code?: string }>) {
+  /**
+   * Check the chunk's module graph rather than its emitted text: minification
+   * renames the factory's `require` parameter, so a textual scan for
+   * `require(...)` silently stops checking anything once the client bundle is
+   * minified. Every module in the graph must be this plugin's own source or a
+   * platform-table external — which also enforces the plugin's "zero
+   * third-party runtime bytes" contract.
+   */
+  generateBundle(
+    _options: unknown,
+    bundle: Record<string, { type: string; code?: string; moduleIds?: string[] }>,
+  ) {
     for (const [fileName, chunk] of Object.entries(bundle)) {
-      if (chunk.type !== 'chunk' || chunk.code === undefined) continue
-      for (const match of chunk.code.matchAll(REQUIRE_PATTERN)) {
+      if (chunk.type !== 'chunk') continue
+      for (const id of chunk.moduleIds ?? []) {
+        if (id.startsWith('\0')) continue
+        if (CLIENT_EXTERNALS.includes(id)) continue
+        // This plugin's own source, wherever it sits: the client half shares
+        // pure helpers with the host half (the local-day arithmetic, the buckets).
+        if (id.startsWith(SOURCE_ROOT) || id.startsWith('.')) continue
+        throw new Error(
+          `client bundle purity: ${fileName} pulls in "${id}", which is neither this plugin's own source nor a platform module`,
+        )
+      }
+      for (const match of (chunk.code ?? '').matchAll(REQUIRE_PATTERN)) {
         const specifier = match[1] ?? ''
         if (CLIENT_EXTERNALS.includes(specifier)) continue
         throw new Error(
@@ -79,6 +104,10 @@ const client: UserConfig = {
   dts: false,
   sourcemap: true,
   clean: false,
+  // The browser bundle is a served artifact, not something anyone reads on
+  // disk: comments and whitespace are download weight with no reader. The
+  // module loader wrapper and the string literals it needs survive minification.
+  minify: true,
   external: [...CLIENT_EXTERNALS],
   define,
   inputOptions: {

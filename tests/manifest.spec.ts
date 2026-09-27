@@ -171,8 +171,10 @@ describe('committed build artifacts', () => {
 
   it('registers the client bundle under the id the profile row names', () => {
     const bundle = readText('lib/client.js')
-    expect(bundle).toContain('window.__ModuleLoader__.load(')
-    expect(bundle).toContain('id: "dsh-token-perf"')
+    expect(bundle).toContain('__ModuleLoader__.load(')
+    // The id's quoting is a build-format detail: minification rewrites the
+    // string literal as a template literal, so assert the value it carries.
+    expect(bundle).toMatch(/__ModuleLoader__\.load\(\{\s*id:\s*[`"']dsh-token-perf[`"']/)
     const foreign = [...bundle.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)]
       .map(match => match[1] ?? '')
       .filter(specifier => !PLATFORM_MODULES.includes(specifier))
@@ -210,7 +212,9 @@ describe('committed artifacts are not stale', () => {
   it('matches the committed build fingerprint', () => {
     const recorded = JSON.parse(readText(FINGERPRINT)) as { digest: string; files: Record<string, string> }
     const current = Object.fromEntries(
-      listFiles(SOURCE).map(path => [path, createHash('sha256').update(readFileSync(join(ROOT, path))).digest('hex')]),
+      [...listFiles(SOURCE), 'tsdown.config.ts', 'tsconfig.build.json'].sort().map(
+        path => [path, createHash('sha256').update(readFileSync(join(ROOT, path))).digest('hex')],
+      ),
     )
     expect(recorded.files).toEqual(current)
     expect(recorded.digest).toBe(

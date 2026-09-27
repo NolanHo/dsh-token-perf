@@ -2,8 +2,8 @@
  * The Host half's configuration surface.
  *
  * A cordis composition declares these fields under the `dsh-token-perf` entry;
- * Schemastery fills the three that have a host-derived default, so the plugin's
- * `apply` always receives every field resolved.
+ * Schemastery fills the four that have a default, so the plugin's `apply`
+ * always receives every field resolved.
  * @module dsh-token-perf/config
  */
 import z from '@deepseek-ai/schemastery';
@@ -17,6 +17,13 @@ export interface Config {
     timeZone?: string;
     /** How long a finished report may be served from cache, in milliseconds; `0` disables caching. */
     cacheTtlMs: number;
+    /**
+     * Retry share at which a `(day, route)` window is reported as a retry signal,
+     * `0..1`. It is the second gate only: a route needs at least 100 settled calls
+     * before its Wilson 95% lower bound is compared against this value, so the
+     * signal never fires on a small sample.
+     */
+    retryThresholdShare: number;
 }
 /**
  * The dictionary shipped beside the built entry: `pnpm build` copies

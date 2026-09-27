@@ -2,8 +2,8 @@
  * The Host half's configuration surface.
  *
  * A cordis composition declares these fields under the `dsh-token-perf` entry;
- * Schemastery fills the three that have a host-derived default, so the plugin's
- * `apply` always receives every field resolved.
+ * Schemastery fills the four that have a default, so the plugin's `apply`
+ * always receives every field resolved.
  * @module dsh-token-perf/config
  */
 
@@ -21,10 +21,20 @@ export interface Config {
   timeZone?: string
   /** How long a finished report may be served from cache, in milliseconds; `0` disables caching. */
   cacheTtlMs: number
+  /**
+   * Retry share at which a `(day, route)` window is reported as a retry signal,
+   * `0..1`. It is the second gate only: a route needs at least 100 settled calls
+   * before its Wilson 95% lower bound is compared against this value, so the
+   * signal never fires on a small sample.
+   */
+  retryThresholdShare: number
 }
 
 /** Default cache lifetime: long enough to absorb a panel's refresh burst, short enough to stay live. */
 const DEFAULT_CACHE_TTL_MS = 30_000
+
+/** Default retry threshold: ten percent of a window's settled calls. */
+const DEFAULT_RETRY_THRESHOLD_SHARE = 0.1
 
 /**
  * The dictionary shipped beside the built entry: `pnpm build` copies
@@ -40,4 +50,5 @@ export const Config: z<Partial<Config>, Config> = z.object({
   dictionaryPath: z.string().default(DEFAULT_DICTIONARY_PATH),
   timeZone: z.string().default(resolveHostTimeZone()),
   cacheTtlMs: z.number().min(0).default(DEFAULT_CACHE_TTL_MS),
+  retryThresholdShare: z.number().min(0).max(1).default(DEFAULT_RETRY_THRESHOLD_SHARE),
 })

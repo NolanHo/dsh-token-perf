@@ -170,14 +170,27 @@ describe('scanDay', () => {
     expect(failure.message).toContain('absent.sqlite')
   })
 
-  it('reports an unsupported schema version with the version it found', async () => {
-    const store = writeStore('version.sqlite', () => {}, 19)
+  it('reports a store older than the readable floor with the version it found', async () => {
+    const store = writeStore('version.sqlite', () => {}, 18)
 
     const failure = await failureOf(options(store))
 
     expect(failure.code).toBe('unsupported-schema')
-    expect(failure.message).toContain('19')
-    expect(failure.message).toContain('expected 20')
+    expect(failure.message).toContain('18')
+    expect(failure.message).toContain('decodes 19 and later')
+  })
+
+  it('reads a store whose later schema only added tables', async () => {
+    // 19 introduced the `ignorable` semantics this reader needs; 20 and 21 added
+    // indexes and left every column and payload alone, so a floor keeps reading
+    // them. An exact-version guard rejected the whole store instead.
+    for (const version of [19, 20, 21, 24]) {
+      const store = writeStore(`version-${version}.sqlite`, () => {}, version)
+
+      const scan = await scanDay(options(store))
+
+      expect(scan.events).toHaveLength(0)
+    }
   })
 
   it('reports a missing column by name', async () => {

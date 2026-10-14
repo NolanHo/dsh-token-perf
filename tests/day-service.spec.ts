@@ -107,12 +107,19 @@ describe('getDayReport', () => {
     await expect(getDayReport(YESTERDAY, config)).resolves.toMatchObject({ ok: false, code: 'no-database' })
   })
 
-  it('reports a store of another schema version as unsupported-schema', async () => {
-    const store = createStore('schema-v19.sqlite', 19)
+  it('reports a store older than the readable floor as unsupported-schema', async () => {
+    const store = createStore('schema-v18.sqlite', 18)
     await expect(getDayReport(YESTERDAY, configFor(store.path))).resolves.toMatchObject({
       ok: false,
       code: 'unsupported-schema',
     })
+  })
+
+  it('reads a store whose schema version only added tables after the floor', async () => {
+    // The live store moved to 21 while this reader expected 20, and every column
+    // it reads was unchanged; the floor keeps such a store readable.
+    const store = createStore('schema-v21.sqlite', 21)
+    await expect(getDayReport(YESTERDAY, configFor(store.path))).resolves.toMatchObject({ ok: true })
   })
 
   it('folds a synthetic day into the wire envelope', async () => {

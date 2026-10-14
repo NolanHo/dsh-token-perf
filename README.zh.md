@@ -110,7 +110,7 @@ host 半有五个字段，写在 cordis 组合里 `dsh-token-perf` 那一行下�
 
 - **数据源。** `$DSH_HOME/sessions.sqlite`，SQLite 会话后端的文件，以只读方式打开（`node:sqlite` 的 `DatabaseSync` 加 `readOnly: true`）。库的属主继续写自己的；这里不写、不加锁。
 - **两次窗口扫描。** 库里 `events.time` 没有索引，所以无论窗口多宽，一次窗口读取都是一遍全表，而一份报告要跑两遍。当天自己的扫描（`time >= start AND time < end`，按 `(session_id, seq)` 排序）解码每一条 event，折叠上面每一项指标以及当天自己的工作量信号，并加载所需的 `sessions` header；另一遍只算工作量的扫描覆盖此前六天，为副本摘要读取每行的 type 与 time，只解码它要求和的结算。event payload 是用 vendored 字典压缩的 zstd（极少数行以纯文本存放），因此一律在 Node 里解码，绝不走 SQL。
-- **schema 守卫。** reader 要求 `PRAGMA user_version` 为 20 且它读取的列都存在。任何其它情况在解码任何 payload 之前就以 `unsupported-schema` 失败，而不是用不认识的格式报出错误数字。
+- **schema 守卫。** reader 要求 `PRAGMA user_version` 不低于 19，且它读取的列都存在。更旧的格式在解码任何 payload 之前就以 `unsupported-schema` 失败。更新的版本按原样读取：附加式升版（schema 20 的 UA-turn 索引、schema 21 的）不改变这些列中的任何一个，而拒绝它等于把每次迁移都变成一次故障。
 - **token 口径镜像 harness 自己的 `tokenUsage` 投影。** 每个 session 只有**一个**替换槽，不是按 key 建的表：只有当采样的 `(session, turn, step)` 与该槽的 key 相同时才与槽折叠，因此某个 key 在别的 key 推进过槽之后再出现时，是从零开始计而不是从它自己的陈旧桶计。命中的采样替换先前那个，所以只有净增量改变总计；`llm/retry-started` 只在它指向同一个 key 时清空该槽——这正是重试的那次调用会完整计费的原因。一个采样要么是 `assistant/message` 的 `data.usage`，要么是 `assistant/attempt` 的 `data.stream` 里最后一个 `chunk.type === 'usage'`。五个桶映射 `inputTokens`、`outputTokens`、`cacheReadTokens`、`cacheWriteTokens`、`reasoningTokens`；`totalTokens` 从不求和，因为它是单次调用含 cache 的全量，而不是五个桶之一。不带路由的采样会归到它所替换的那条采样的路由上。
 - **路由键是 `provider:model`。** 路由读自 `assistant/message.data.message.source.{provider,model}`。同一个模型由两个 provider 提供就是两行，因为那是两条计费路由。
 - **步延迟。** 同一 `(session, turn, step)` 的 `assistant/message.time − step/start.time`，按 `provider:model` 折叠。当天没有结算的步只贡献 token、不贡献延迟样本，所以某条路由的 `steps` 小于它的结算次数。`p50Ms`/`p90Ms` 取索引 `floor(n × 分数)` 处并夹到最后一个样本的次序统计量——即参考脚本的规则；它与教科书最近秩最多差一个次序统计量，所以线协议直接写规则本身而不写教科书术语。**任何地方都不报平均延迟**，面板画的是 p50 横条加 p90 须线，不是均值棒。采样不带路由时单独归入 `unknown` 行，而不是丢掉。
@@ -133,7 +133,7 @@ host 半有五个字段，写在 cordis 组合里 `dsh-token-perf` 那一行下�
 - **`created_at` 是当前 incarnation 的创建时刻。** 被 resume 或带 seed 的 session 可能带着远晚于其首条 event 的创建时间，因此一个算作"今天开启"的 session 里可能包含更早的 event 时间；这两者有意不做互相校验。
 - **原始日总量并不稳定。** 由于带 seed 或 fork 的会话会把复制来的 event 连同原本的时间戳重新追加，这些追加会持续落进已关闭日期的窗口：`totals`、`byModel`、会话行与 `rate` 描述的是扫描时刻的窗口，会随着副本写入而向上漂移。去副本后的 `work` 才是稳定的那一半——2026-09-20 与 2026-09-21 的 output/cacheRead 等于漂移开始之前测得的数值（output 26,519,140 与 19,880,737；cacheRead 4,236,351,104 与 3,676,235,324）。
 - **去重规则比它来源的分析基线更严。** 2026-09-21 上它剔除四个副本会话（17,510 条事件），而最初的分析只找到一组。它是带明确阈值的启发式——至少 50 行、首条 event 同毫秒、序列一致超过 99%——不是"确已复制"的证明；首条 event 落在别的毫秒的重复副本检不出来。
-- **只支持一种会话后端、一个 schema 版本。** 只有 `user_version = 20` 的 SQLite 库可读。其它后端或升版后的 schema 会在面板里以 `unsupported-schema` 呈现，而不是给出一份报告：reader 宁可响亮失败，也不解码它不认识的格式。
+- **只支持一种会话后端，带 schema 下限。** 只有 `user_version >= 19` 的 SQLite 库可读；其它后端在面板里以 `unsupported-schema` 呈现，而不是给出一份报告。更高的 schema 按尽力而为读取：若某次升版重排了 `data`，受影响的行解码失败、计入 `skippedEvents`，面板会把这一天标为不完整，而不是悄悄少报。
 - **报告首次加载很贵，命中缓存则是 0 成本。** 由于 `events.time` 没有索引，一天加七日趋势要跑两遍全表：在 3.4 GB / 220 万条 event 的库上实测约 **46 秒冷启动**、有热页缓存时约 **37 秒**。之后结果进入缓存——过去的天无限期保留，当天保留 `cacheTtlMs`——命中缓存耗时 0 ms。扫描每 256 行让出一次事件循环，因此不会卡住正在运行的 Host；`durationMs` 给出真实成本。
 - **总计不含 compaction 摘要 token。** `totals` 与 `byModel` 只是主循环折叠；摘要自身的用量只在 `compaction.summaryTokens` 里。与 provider 账单对账时要把两者相加。
 

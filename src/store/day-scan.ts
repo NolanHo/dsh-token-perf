@@ -146,8 +146,20 @@ export interface WorkRangeOptions extends ScanOptions {
   timeZone: string
 }
 
-/** The physical format this reader understands; a store at any other version needs its own reader. */
-const SCHEMA_VERSION = 20
+/**
+ * Oldest on-disk format this reader decodes. Schema 19 introduced the nullable
+ * `ignorable` envelope column, and the packed-row decision below depends on how
+ * that column marks a chunk row; everything else this reader needs is named in
+ * {@link REQUIRED_COLUMNS} and checked directly.
+ *
+ * Newer versions are read as they are. A schema bump that adds tables — schema
+ * 20's UA-turn index, schema 21's — leaves every column and every payload this
+ * reader touches alone, so requiring an exact version turned each additive
+ * migration into an outage. A bump that does repack `data` still fails loudly
+ * per row instead: those rows land in `skippedEvents`, and the panel reports an
+ * incomplete day rather than a quiet undercount.
+ */
+const MIN_SCHEMA_VERSION = 19
 
 /** Columns the reader needs; a store missing one is not this schema. */
 const REQUIRED_COLUMNS: ReadonlyArray<readonly [table: string, columns: readonly string[]]> = [
@@ -774,21 +786,22 @@ function numberOf(value: unknown): number {
 }
 
 /**
- * Reject a store whose physical format this reader cannot decode.
+ * Reject a store this reader cannot decode at all.
  *
- * The guard runs before any row is read: a schema bump can repack `data` or
- * reinterpret `ignorable`, and decoding such a store would report wrong
- * numbers instead of failing.
+ * The version floor rejects formats older than the `ignorable` semantics the
+ * reader relies on; the column check below carries the rest of the dependency,
+ * so an additive schema bump keeps reading. See {@link MIN_SCHEMA_VERSION} for
+ * why the version is a floor rather than an equality.
  * @param store - the open store handle.
  * @param databasePath - path named in the failure message.
  * @throws {ScanError} with code `unsupported-schema` naming the actual version or missing columns.
  */
 function assertSupportedSchema(store: DatabaseSync, databasePath: string): void {
   const version = (store.prepare('PRAGMA user_version').get() as { user_version?: unknown } | undefined)?.user_version
-  if (version !== SCHEMA_VERSION) {
+  if (typeof version !== 'number' || version < MIN_SCHEMA_VERSION) {
     throw new ScanError(
       'unsupported-schema',
-      `session store ${databasePath} reports schema version ${String(version)}, expected ${SCHEMA_VERSION}`,
+      `session store ${databasePath} reports schema version ${String(version)}; this reader decodes ${MIN_SCHEMA_VERSION} and later`,
     )
   }
   for (const [table, columns] of REQUIRED_COLUMNS) {
